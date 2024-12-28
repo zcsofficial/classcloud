@@ -1,59 +1,76 @@
 <?php
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $role = $_POST['role'];
-    $name = $_POST['name'] ?? '';
-    $institution_id = $_POST['institution_id'] ?? '';
-    $instructor_id = $_POST['instructor_id'] ?? '';
-    $email = $_POST['email'] ?? '';
-    $password = $_POST['password'] ?? '';
-    $institution_name = $_POST['institution_name'] ?? '';
+include 'db.php'; // Database connection
 
-    // Database connection
-    $conn = new mysqli('localhost', 'root', 'Adnan@66202', 'class_cloud');
-    if ($conn->connect_error) {
-        die('Connection failed: ' . $conn->connect_error);
-    }
+$message = "";
+$messageType = "";
 
-    // Insert data based on role
-    if ($role === 'institution') {
-        $stmt = $conn->prepare("INSERT INTO institutions (institution_name, institution_id, email, password) VALUES (?, ?, ?, ?)");
-        $stmt->bind_param('ssss', $institution_name, $institution_id, $email, $password);
-        if ($stmt->execute()) {
-            echo "<script>alert('Institution registration successful!');</script>";
-        } else {
-            echo "<script>alert('Institution registration failed. Please try again.');</script>";
-        }
-    } elseif ($role === 'instructor') {
-        // First, check if the institution exists
-        $stmt = $conn->prepare("SELECT institution_id FROM institutions WHERE institution_id = ?");
-        $stmt->bind_param('s', $institution_id);
-        $stmt->execute();
-        $stmt->store_result();
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $role = $_POST['role'] ?? '';
+    $name = trim($_POST['name'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $password = trim($_POST['password'] ?? '');
+    $collegeName = trim($_POST['collegeName'] ?? '');
+    $collegeCode = trim($_POST['collegeCode'] ?? '');
 
-        if ($stmt->num_rows > 0) {
-            // Institution exists, insert instructor
-            $stmt = $conn->prepare("INSERT INTO instructors (name, instructor_id, institution_id, email, password) VALUES (?, ?, ?, ?, ?)");
-            $stmt->bind_param('sssss', $name, $instructor_id, $institution_id, $email, $password);
-            if ($stmt->execute()) {
-                echo "<script>alert('Instructor registration successful!');</script>";
+    if (empty($name) || empty($email) || empty($password)) {
+        $message = "All fields are required.";
+        $messageType = "danger";
+    } elseif (strlen($password) < 8) {
+        $message = "Password must be at least 8 characters long.";
+        $messageType = "danger";
+    } else {
+        $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
+
+        if ($role === 'college') {
+            if (empty($collegeName) || empty($collegeCode)) {
+                $message = "College name and code are required for College Admin.";
+                $messageType = "danger";
             } else {
-                echo "<script>alert('Instructor registration failed. Please try again.');</script>";
+                $stmt = $conn->prepare("INSERT INTO colleges (name, code) VALUES (?, ?)");
+                $stmt->bind_param("ss", $collegeName, $collegeCode);
+
+                if ($stmt->execute()) {
+                    $stmt = $conn->prepare("INSERT INTO users (name, email, password, role, college_code) VALUES (?, ?, ?, 'admin', ?)");
+                    $stmt->bind_param("ssss", $name, $email, $hashedPassword, $collegeCode);
+                    if ($stmt->execute()) {
+                        $message = "College and Admin account registered successfully!";
+                        $messageType = "success";
+                    } else {
+                        $message = "Error registering admin: " . $stmt->error;
+                        $messageType = "danger";
+                    }
+                } else {
+                    $message = "Error registering college: " . $stmt->error;
+                    $messageType = "danger";
+                }
             }
         } else {
-            echo "<script>alert('Institution ID does not exist. Please check the institution details.');</script>";
-        }
-    } elseif ($role === 'student') {
-        $stmt = $conn->prepare("INSERT INTO students (name, instructor_id, email, password) VALUES (?, ?, ?, ?)");
-        $stmt->bind_param('ssss', $name, $instructor_id, $email, $password);
-        if ($stmt->execute()) {
-            echo "<script>alert('Student registration successful!');</script>";
-        } else {
-            echo "<script>alert('Student registration failed. Please try again.');</script>";
+            if (empty($collegeCode)) {
+                $message = "College code is required.";
+                $messageType = "danger";
+            } else {
+                $stmt = $conn->prepare("SELECT code FROM colleges WHERE code = ?");
+                $stmt->bind_param("s", $collegeCode);
+                $stmt->execute();
+                $result = $stmt->get_result();
+
+                if ($result->num_rows > 0) {
+                    $stmt = $conn->prepare("INSERT INTO users (name, email, password, role, college_code) VALUES (?, ?, ?, ?, ?)");
+                    $stmt->bind_param("sssss", $name, $email, $hashedPassword, $role, $collegeCode);
+                    if ($stmt->execute()) {
+                        $message = ucfirst($role) . " registered successfully! Waiting for admin approval.";
+                        $messageType = "success";
+                    } else {
+                        $message = "Error registering user: " . $stmt->error;
+                        $messageType = "danger";
+                    }
+                } else {
+                    $message = "Invalid college code. Please check and try again.";
+                    $messageType = "danger";
+                }
+            }
         }
     }
-
-    $stmt->close();
-    $conn->close();
 }
 ?>
 
@@ -62,116 +79,140 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Class Cloud - Register</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <title>Register | Class Cloud</title>
+    <!-- External Libraries -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #6e8efb, #a777e3);
+            font-family: 'Roboto', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .form-container {
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            max-width: 400px;
+            width: 100%;
+        }
+        .form-container h1 {
+            font-weight: 700;
+            color: #6e8efb;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+        .form-container .form-label {
+            font-weight: 500;
+        }
+        .form-container .btn-primary {
+            background: #6e8efb;
+            border: none;
+        }
+        .form-container .btn-primary:hover {
+            background: #5a76d6;
+        }
+        .form-container .form-control {
+            border-radius: 10px;
+        }
+        .form-container .input-group-text {
+            background: #6e8efb;
+            color: white;
+            border: none;
+            border-radius: 10px 0 0 10px;
+        }
+        .form-container a {
+            color: #6e8efb;
+            text-decoration: none;
+        }
+        .form-container a:hover {
+            text-decoration: underline;
+        }
+        .login-link {
+            text-align: center;
+            margin-top: 1rem;
+        }
+    </style>
 </head>
-<body class="bg-light">
-    <div class="container mt-5">
-        <div class="card shadow-sm">
-            <div class="card-header bg-primary text-white text-center">
-                <h3 class="mb-0">Register on Class Cloud</h3>
-            </div>
-            <div class="card-body">
-                <form method="POST">
-                    <div class="mb-3">
-                        <label for="role" class="form-label">
-                            <i class="fas fa-user-tag"></i> Register as
-                        </label>
-                        <select name="role" id="role" class="form-select" required>
-                            <option value="">Select Role</option>
-                            <option value="institution">Institution</option>
-                            <option value="instructor">Instructor</option>
-                            <option value="student">Student</option>
-                        </select>
-                    </div>
-                    <div id="dynamic-fields"></div>
-                    <div class="mb-3">
-                        <label for="email" class="form-label">
-                            <i class="fas fa-envelope"></i> Email
-                        </label>
-                        <input type="email" name="email" id="email" class="form-control" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="password" class="form-label">
-                            <i class="fas fa-lock"></i> Password
-                        </label>
-                        <input type="password" name="password" id="password" class="form-control" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary w-100">
-                        <i class="fas fa-user-plus"></i> Register
-                    </button>
-                </form>
-            </div>
-            <div class="card-footer text-center">
-                <p class="mb-0">Already have an account? <a href="login.php" class="text-primary">Login here</a></p>
+<body>
+    <div class="container">
+        <div class="form-container">
+            <h1>Register</h1>
+
+            <!-- Message Display -->
+            <?php if (!empty($message)): ?>
+                <div class="alert alert-<?php echo $messageType; ?>" role="alert">
+                    <?php echo $message; ?>
+                </div>
+            <?php endif; ?>
+
+            <form method="POST" action="">
+                <div class="mb-3">
+                    <label for="role" class="form-label">Role</label>
+                    <select class="form-select" id="role" name="role" required>
+                        <option value="learner">Learner</option>
+                        <option value="instructor">Instructor</option>
+                        <option value="college">College Admin</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label for="name" class="form-label">Name</label>
+                    <input type="text" class="form-control" id="name" name="name" placeholder="Enter your name" required>
+                </div>
+
+                <div class="mb-3">
+                    <label for="email" class="form-label">Email</label>
+                    <input type="email" class="form-control" id="email" name="email" placeholder="Enter your email" required>
+                </div>
+
+                <div class="mb-3">
+                    <label for="password" class="form-label">Password</label>
+                    <input type="password" class="form-control" id="password" name="password" placeholder="Enter your password" required>
+                </div>
+
+                <div class="mb-3">
+                    <label for="collegeName" class="form-label">College Name</label>
+                    <input type="text" class="form-control" id="collegeName" name="collegeName" disabled>
+                </div>
+
+                <div class="mb-3">
+                    <label for="collegeCode" class="form-label">College Code</label>
+                    <input type="text" class="form-control" id="collegeCode" name="collegeCode" >
+                </div>
+
+                <button type="submit" class="btn btn-primary w-100">Register</button>
+            </form>
+
+            <div class="login-link">
+                <p>Already have an account? <a href="login.php"><i class="fas fa-sign-in-alt"></i> Login</a></p>
             </div>
         </div>
     </div>
 
     <script>
-        $(document).ready(function () {
-            $('#role').change(function () {
-                const role = $(this).val();
-                let fields = '';
+        const roleSelect = document.getElementById('role');
+        const collegeNameInput = document.getElementById('collegeName');
+        const collegeCodeInput = document.getElementById('collegeCode');
 
-                if (role === 'institution') {
-                    fields = ` 
-                        <div class="mb-3">
-                            <label for="institution_name" class="form-label">
-                                <i class="fas fa-building"></i> Institution Name
-                            </label>
-                            <input type="text" name="institution_name" id="institution_name" class="form-control" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="institution_id" class="form-label">
-                                <i class="fas fa-id-badge"></i> Institution ID
-                            </label>
-                            <input type="text" name="institution_id" id="institution_id" class="form-control" required>
-                        </div>
-                    `;
-                } else if (role === 'instructor') {
-                    fields = `
-                        <div class="mb-3">
-                            <label for="name" class="form-label">
-                                <i class="fas fa-chalkboard-teacher"></i> Instructor Name
-                            </label>
-                            <input type="text" name="name" id="name" class="form-control" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="instructor_id" class="form-label">
-                                <i class="fas fa-id-card"></i> Instructor ID
-                            </label>
-                            <input type="text" name="instructor_id" id="instructor_id" class="form-control" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="institution_id" class="form-label">
-                                <i class="fas fa-school"></i> Institution ID
-                            </label>
-                            <input type="text" name="institution_id" id="institution_id" class="form-control" required>
-                        </div>
-                    `;
-                } else if (role === 'student') {
-                    fields = `
-                        <div class="mb-3">
-                            <label for="name" class="form-label">
-                                <i class="fas fa-user"></i> Student Name
-                            </label>
-                            <input type="text" name="name" id="name" class="form-control" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="instructor_id" class="form-label">
-                                <i class="fas fa-user-graduate"></i> Instructor ID
-                            </label>
-                            <input type="text" name="instructor_id" id="instructor_id" class="form-control" required>
-                        </div>
-                    `;
-                }
-
-                $('#dynamic-fields').html(fields);
-            });
+        roleSelect.addEventListener('change', () => {
+            const role = roleSelect.value;
+            if (role === 'college') {
+                collegeNameInput.disabled = false;
+                collegeCodeInput.disabled = false;
+            } else {
+                collegeNameInput.disabled = true;
+                collegeCodeInput.disabled = false;
+            }
         });
     </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
