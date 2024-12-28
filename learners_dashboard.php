@@ -15,59 +15,91 @@ $messageType = '';
 // Fetch college code from session
 $college_code = $_SESSION['college_code'];
 
-// Fetch available years, semesters, subjects, units, and topics for filtering
-$years = $conn->query("SELECT DISTINCT year FROM courses WHERE college_code = '$college_code'");
-$semesters = $conn->query("SELECT DISTINCT semester FROM courses WHERE college_code = '$college_code'");
-$subjects = $conn->query("SELECT DISTINCT subject FROM courses WHERE college_code = '$college_code'");
-$units = $conn->query("SELECT DISTINCT unit FROM courses WHERE college_code = '$college_code'");
-$topics = $conn->query("SELECT DISTINCT topic FROM courses WHERE college_code = '$college_code'");
+// Initialize variables for dynamic content
+$semesters = [];
+$subjects = [];
+$units = [];
+$topics = [];
+$notes = '';
 
-// Fetch courses based on selected filters
+// Prepare the base query for fetching courses
 $filterQuery = "SELECT * FROM courses WHERE college_code = ?";
 $filterParams = [$college_code];
 
-// Apply filters if any are selected
-if (isset($_GET['year'])) {
-    $filterQuery .= " AND year = ?";
-    $filterParams[] = $_GET['year'];
-}
-if (isset($_GET['semester'])) {
-    $filterQuery .= " AND semester = ?";
-    $filterParams[] = $_GET['semester'];
-}
-if (isset($_GET['subject'])) {
-    $filterQuery .= " AND subject = ?";
-    $filterParams[] = $_GET['subject'];
-}
-if (isset($_GET['unit'])) {
-    $filterQuery .= " AND unit = ?";
-    $filterParams[] = $_GET['unit'];
-}
-if (isset($_GET['topic'])) {
-    $filterQuery .= " AND topic = ?";
-    $filterParams[] = $_GET['topic'];
+// Fetch available years for filtering
+$years = $conn->prepare("SELECT DISTINCT year FROM courses WHERE college_code = ?");
+$years->bind_param("s", $college_code);
+$years->execute();
+$yearsResult = $years->get_result();
+
+// Handle the dynamic filtering options
+if (isset($_POST['apply_filters'])) {
+    $year = $_POST['year'] ?? '';
+    $semester = $_POST['semester'] ?? '';
+    $subject = $_POST['subject'] ?? '';
+    $unit = $_POST['unit'] ?? '';
+    $topic = $_POST['topic'] ?? '';
+
+    if ($year) {
+        $filterQuery .= " AND year = ?";
+        $filterParams[] = $year;
+    }
+    if ($semester) {
+        $filterQuery .= " AND semester = ?";
+        $filterParams[] = $semester;
+    }
+    if ($subject) {
+        $filterQuery .= " AND subject = ?";
+        $filterParams[] = $subject;
+    }
+    if ($unit) {
+        $filterQuery .= " AND unit = ?";
+        $filterParams[] = $unit;
+    }
+    if ($topic) {
+        $filterQuery .= " AND topic = ?";
+        $filterParams[] = $topic;
+    }
 }
 
 $stmt = $conn->prepare($filterQuery);
-$stmt->bind_param(str_repeat("s", count($filterParams)), ...$filterParams);
+if ($filterParams) {
+    $stmt->bind_param(str_repeat("s", count($filterParams)), ...$filterParams);
+}
 $stmt->execute();
 $courses = $stmt->get_result();
 
-// Fetch course details based on the course ID
-if (isset($_GET['course_id'])) {
-    $course_id = $_GET['course_id'];
-    $stmt = $conn->prepare("SELECT * FROM courses WHERE id = ?");
-    $stmt->bind_param("i", $course_id);
-    $stmt->execute();
-    $courseDetails = $stmt->get_result()->fetch_assoc();
+// Handle filtering options dynamically
+if (isset($_POST['year'])) {
+    $year = $_POST['year'];
+    $semesters = $conn->prepare("SELECT DISTINCT semester FROM courses WHERE college_code = ? AND year = ?");
+    $semesters->bind_param("ss", $college_code, $year);
+    $semesters->execute();
+    $semestersResult = $semesters->get_result();
+}
 
-    // Fetch year, semester, subject, unit, topic, and notes
-    $year = $courseDetails['year'];
-    $semester = $courseDetails['semester'];
-    $subject = $courseDetails['subject'];
-    $unit = $courseDetails['unit'];
-    $topic = $courseDetails['topic'];
-    $notes = $courseDetails['notes'];  // File path or link to download
+if (isset($_POST['semester'])) {
+    $semester = $_POST['semester'];
+    $subjects = $conn->prepare("SELECT DISTINCT subject FROM courses WHERE college_code = ? AND semester = ?");
+    $subjects->bind_param("ss", $college_code, $semester);
+    $subjects->execute();
+    $subjectsResult = $subjects->get_result();
+}
+
+if (isset($_POST['subject'])) {
+    $subject = $_POST['subject'];
+    $units = $conn->prepare("SELECT DISTINCT unit FROM courses WHERE college_code = ? AND subject = ?");
+    $units->bind_param("ss", $college_code, $subject);
+    $units->execute();
+    $unitsResult = $units->get_result();
+}
+
+if (isset($_POST['unit'])) {
+    $unit = $_POST['unit'];
+    $topics = $conn->prepare("SELECT DISTINCT topic FROM courses WHERE college_code = ? AND unit = ?");
+    $topics->bind_param("ss", $college_code, $unit);
+    $topics->execute();
+    $topicsResult = $topics->get_result();
 }
 ?>
 
@@ -77,7 +109,6 @@ if (isset($_GET['course_id'])) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Learner Dashboard | Class Cloud</title>
-    <!-- External Libraries -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
@@ -171,108 +202,97 @@ if (isset($_GET['course_id'])) {
         </div>
     </nav>
 
-    <!-- Filters Section -->
+    <!-- Courses List (Learner) -->
     <div class="container mt-5">
-        <h2 class="text-center text-white">Filter Courses</h2>
-        <form action="learners_dashboard.php" method="get">
+        <h2 class="text-center text-white">Available Courses</h2>
+
+        <!-- Filter Form -->
+        <form method="POST" id="filter-form">
             <div class="row">
                 <div class="col-md-3">
-                    <select name="year" class="form-select" aria-label="Select Year">
+                    <select name="year" id="year" class="form-select" aria-label="Select Year">
                         <option value="">Select Year</option>
-                        <?php while ($yearRow = $years->fetch_assoc()): ?>
-                            <option value="<?php echo $yearRow['year']; ?>" <?php echo isset($_GET['year']) && $_GET['year'] == $yearRow['year'] ? 'selected' : ''; ?>>
+                        <?php while ($yearRow = $yearsResult->fetch_assoc()): ?>
+                            <option value="<?php echo $yearRow['year']; ?>" <?php echo (isset($_POST['year']) && $_POST['year'] == $yearRow['year']) ? 'selected' : ''; ?>>
                                 <?php echo $yearRow['year']; ?>
                             </option>
                         <?php endwhile; ?>
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <select name="semester" class="form-select" aria-label="Select Semester">
+                    <select name="semester" id="semester" class="form-select" aria-label="Select Semester">
                         <option value="">Select Semester</option>
-                        <?php while ($semesterRow = $semesters->fetch_assoc()): ?>
-                            <option value="<?php echo $semesterRow['semester']; ?>" <?php echo isset($_GET['semester']) && $_GET['semester'] == $semesterRow['semester'] ? 'selected' : ''; ?>>
-                                <?php echo $semesterRow['semester']; ?>
-                            </option>
-                        <?php endwhile; ?>
+                        <?php if (isset($semestersResult)): ?>
+                            <?php while ($semesterRow = $semestersResult->fetch_assoc()): ?>
+                                <option value="<?php echo $semesterRow['semester']; ?>" <?php echo (isset($_POST['semester']) && $_POST['semester'] == $semesterRow['semester']) ? 'selected' : ''; ?>>
+                                    <?php echo $semesterRow['semester']; ?>
+                                </option>
+                            <?php endwhile; ?>
+                        <?php endif; ?>
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <select name="subject" class="form-select" aria-label="Select Subject">
+                    <select name="subject" id="subject" class="form-select" aria-label="Select Subject">
                         <option value="">Select Subject</option>
-                        <?php while ($subjectRow = $subjects->fetch_assoc()): ?>
-                            <option value="<?php echo $subjectRow['subject']; ?>" <?php echo isset($_GET['subject']) && $_GET['subject'] == $subjectRow['subject'] ? 'selected' : ''; ?>>
-                                <?php echo $subjectRow['subject']; ?>
-                            </option>
-                        <?php endwhile; ?>
+                        <?php if (isset($subjectsResult)): ?>
+                            <?php while ($subjectRow = $subjectsResult->fetch_assoc()): ?>
+                                <option value="<?php echo $subjectRow['subject']; ?>" <?php echo (isset($_POST['subject']) && $_POST['subject'] == $subjectRow['subject']) ? 'selected' : ''; ?>>
+                                    <?php echo $subjectRow['subject']; ?>
+                                </option>
+                            <?php endwhile; ?>
+                        <?php endif; ?>
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <select name="unit" class="form-select" aria-label="Select Unit">
+                    <select name="unit" id="unit" class="form-select" aria-label="Select Unit">
                         <option value="">Select Unit</option>
-                        <?php while ($unitRow = $units->fetch_assoc()): ?>
-                            <option value="<?php echo $unitRow['unit']; ?>" <?php echo isset($_GET['unit']) && $_GET['unit'] == $unitRow['unit'] ? 'selected' : ''; ?>>
-                                <?php echo $unitRow['unit']; ?>
-                            </option>
-                        <?php endwhile; ?>
+                        <?php if (isset($unitsResult)): ?>
+                            <?php while ($unitRow = $unitsResult->fetch_assoc()): ?>
+                                <option value="<?php echo $unitRow['unit']; ?>" <?php echo (isset($_POST['unit']) && $_POST['unit'] == $unitRow['unit']) ? 'selected' : ''; ?>>
+                                    <?php echo $unitRow['unit']; ?>
+                                </option>
+                            <?php endwhile; ?>
+                        <?php endif; ?>
                     </select>
                 </div>
             </div>
             <div class="row mt-3">
                 <div class="col-md-3">
-                    <select name="topic" class="form-select" aria-label="Select Topic">
+                    <select name="topic" id="topic" class="form-select" aria-label="Select Topic">
                         <option value="">Select Topic</option>
-                        <?php while ($topicRow = $topics->fetch_assoc()): ?>
-                            <option value="<?php echo $topicRow['topic']; ?>" <?php echo isset($_GET['topic']) && $_GET['topic'] == $topicRow['topic'] ? 'selected' : ''; ?>>
-                                <?php echo $topicRow['topic']; ?>
-                            </option>
-                        <?php endwhile; ?>
+                        <?php if (isset($topicsResult)): ?>
+                            <?php while ($topicRow = $topicsResult->fetch_assoc()): ?>
+                                <option value="<?php echo $topicRow['topic']; ?>" <?php echo (isset($_POST['topic']) && $_POST['topic'] == $topicRow['topic']) ? 'selected' : ''; ?>>
+                                    <?php echo $topicRow['topic']; ?>
+                                </option>
+                            <?php endwhile; ?>
+                        <?php endif; ?>
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <button type="submit" class="btn btn-primary">Apply Filters</button>
+                    <button type="submit" class="btn btn-warning" name="apply_filters">Apply</button>
                 </div>
             </div>
         </form>
-    </div>
 
-    <!-- Courses List (Learner) -->
-    <div class="container mt-5">
-        <h2 class="text-center text-white">Available Courses</h2>
-        <div class="card-container" id="courses-container">
-            <?php while ($course = $courses->fetch_assoc()): ?>
-                <div class="card" id="course-<?php echo $course['id']; ?>">
-                    <div class="card-body">
-                        <h5 class="card-title"><?php echo htmlspecialchars($course['course_name']); ?></h5>
-                        <a href="learners_dashboard.php?course_id=<?php echo $course['id']; ?>" class="btn btn-primary">View Details</a>
+        <!-- Courses List -->
+        <div class="card-container mt-4">
+            <?php if ($courses->num_rows > 0): ?>
+                <?php while ($course = $courses->fetch_assoc()): ?>
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title"><?php echo $course['course_name']; ?></h5>
+                            <p class="card-text">Year: <?php echo $course['year']; ?> | Semester: <?php echo $course['semester']; ?></p>
+                            <a href="course_details.php?course_id=<?php echo $course['id']; ?>" class="btn btn-primary">Select Course</a>
+                        </div>
                     </div>
-                </div>
-            <?php endwhile; ?>
+                <?php endwhile; ?>
+            <?php else: ?>
+                <p class="text-center text-white">No courses found for the selected filters.</p>
+            <?php endif; ?>
         </div>
     </div>
 
-    <!-- Course Details (Learner) -->
-    <?php if (isset($courseDetails)): ?>
-        <div class="container mt-5">
-            <h2 class="text-center text-white">Course Details</h2>
-            <div class="card">
-                <div class="card-body">
-                    <h5 class="card-title"><?php echo htmlspecialchars($courseDetails['course_name']); ?></h5>
-                    <p class="card-text"><strong>Year:</strong> <?php echo htmlspecialchars($year); ?></p>
-                    <p class="card-text"><strong>Semester:</strong> <?php echo htmlspecialchars($semester); ?></p>
-                    <p class="card-text"><strong>Subject:</strong> <?php echo htmlspecialchars($subject); ?></p>
-                    <p class="card-text"><strong>Unit:</strong> <?php echo htmlspecialchars($unit); ?></p>
-                    <p class="card-text"><strong>Topic:</strong> <?php echo htmlspecialchars($topic); ?></p>
-                    <p class="card-text"><strong>Notes:</strong> 
-                        <a href="<?php echo htmlspecialchars($notes); ?>" download class="btn btn-warning">
-                            <i class="fas fa-download"></i> Download Notes
-                        </a>
-                    </p>
-                </div>
-            </div>
-        </div>
-    <?php endif; ?>
-
-    <!-- External JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
