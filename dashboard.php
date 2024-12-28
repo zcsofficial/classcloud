@@ -18,6 +18,7 @@ if ($_SESSION['user_role'] === 'instructor' && isset($_POST['add_course'])) {
     $semester = $_POST['semester'];
     $year = $_POST['year'];
     $subject = $_POST['subject'];
+    $unit = $_POST['unit']; // Add unit to the form data
     $topic = $_POST['topic'];
     $notes = '';
 
@@ -54,8 +55,8 @@ if ($_SESSION['user_role'] === 'instructor' && isset($_POST['add_course'])) {
 
     if ($notes) {
         // Insert course data into the database
-        $stmt = $conn->prepare("INSERT INTO courses (course_name, semester, year, subject, topic, notes, college_code) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        $stmt->bind_param("sssssss", $courseName, $semester, $year, $subject, $topic, $notes, $_SESSION['college_code']);
+        $stmt = $conn->prepare("INSERT INTO courses (course_name, semester, year, subject, unit, topic, notes, college_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("ssssssss", $courseName, $semester, $year, $subject, $unit, $topic, $notes, $_SESSION['college_code']);
         if ($stmt->execute()) {
             $message = "Course added successfully!";
             $messageType = 'success';
@@ -85,6 +86,13 @@ $stmt = $conn->prepare("SELECT * FROM courses WHERE college_code = ?");
 $stmt->bind_param("s", $_SESSION['college_code']);
 $stmt->execute();
 $result = $stmt->get_result();
+
+// Fetch data for semester, year, subject, and unit from the database (for the form dropdown)
+$semesterQuery = $conn->query("SELECT DISTINCT semester FROM courses WHERE college_code = '{$_SESSION['college_code']}'");
+$yearQuery = $conn->query("SELECT DISTINCT year FROM courses WHERE college_code = '{$_SESSION['college_code']}'");
+$subjectQuery = $conn->query("SELECT DISTINCT subject FROM courses WHERE college_code = '{$_SESSION['college_code']}'");
+$unitQuery = $conn->query("SELECT DISTINCT unit FROM courses WHERE college_code = '{$_SESSION['college_code']}'");
+
 ?>
 
 <!DOCTYPE html>
@@ -183,17 +191,42 @@ $result = $stmt->get_result();
                     <input type="text" class="form-control" name="course_name" id="course_name" required>
                 </div>
                 <div class="mb-3">
-                    <label for="semester" class="form-label">Semester</label>
-                    <input type="text" class="form-control" name="semester" id="semester" required>
+                    <label for="year" class="form-label">Year</label>
+                    <select class="form-control" name="year" id="year" required>
+                        <option value="">Select Year</option>
+                        <?php while ($year = $yearQuery->fetch_assoc()): ?>
+                            <option value="<?php echo $year['year']; ?>"><?php echo $year['year']; ?></option>
+                        <?php endwhile; ?>
+                    </select>
                 </div>
                 <div class="mb-3">
-                    <label for="year" class="form-label">Year</label>
-                    <input type="text" class="form-control" name="year" id="year" required>
+                    <label for="semester" class="form-label">Semester</label>
+                    <select class="form-control" name="semester" id="semester" required>
+                        <option value="">Select Semester</option>
+                        <?php while ($semester = $semesterQuery->fetch_assoc()): ?>
+                            <option value="<?php echo $semester['semester']; ?>"><?php echo $semester['semester']; ?></option>
+                        <?php endwhile; ?>
+                    </select>
                 </div>
                 <div class="mb-3">
                     <label for="subject" class="form-label">Subject</label>
-                    <input type="text" class="form-control" name="subject" id="subject" required>
+                    <select class="form-control" name="subject" id="subject" required>
+                        <option value="">Select Subject</option>
+                        <?php while ($subject = $subjectQuery->fetch_assoc()): ?>
+                            <option value="<?php echo $subject['subject']; ?>"><?php echo $subject['subject']; ?></option>
+                        <?php endwhile; ?>
+                    </select>
                 </div>
+                <div class="mb-3">
+                    <label for="unit" class="form-label">Unit</label>
+                    <select class="form-control" name="unit" id="unit" required>
+                        <option value="">Select Unit</option>
+                        <?php while ($unit = $unitQuery->fetch_assoc()): ?>
+                            <option value="<?php echo $unit['unit']; ?>"><?php echo $unit['unit']; ?></option>
+                        <?php endwhile; ?>
+                    </select>
+                </div>
+
                 <div class="mb-3">
                     <label for="topic" class="form-label">Topic</label>
                     <input type="text" class="form-control" name="topic" id="topic" required>

@@ -2,8 +2,8 @@
 session_start();
 include 'db.php'; // Database connection
 
-// Check if the user is logged in and has admin privileges
-if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'admin') {
+// Check if the user is logged in and has admin or instructor privileges
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['admin', 'instructor'])) {
     header("Location: login.php");
     exit();
 }
@@ -15,9 +15,10 @@ $messageType = '';
 // Handle adding a new course
 if (isset($_POST['add_course'])) {
     $courseName = $_POST['course_name'];
-    $semester = $_POST['semester'];
     $year = $_POST['year'];
+    $semester = $_POST['semester'];
     $subject = $_POST['subject'];
+    $unit = $_POST['unit'];
     $topic = $_POST['topic'];
     $notes = '';
 
@@ -54,8 +55,8 @@ if (isset($_POST['add_course'])) {
 
     if ($notes) {
         // Insert course data into the database
-        $stmt = $conn->prepare("INSERT INTO courses (course_name, semester, year, subject, topic, notes, college_code) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        $stmt->bind_param("sssssss", $courseName, $semester, $year, $subject, $topic, $notes, $_SESSION['college_code']);
+        $stmt = $conn->prepare("INSERT INTO courses (course_name, year, semester, subject, unit, topic, notes, college_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("ssssssss", $courseName, $year, $semester, $subject, $unit, $topic, $notes, $_SESSION['college_code']);
         if ($stmt->execute()) {
             $message = "Course added successfully!";
             $messageType = 'success';
@@ -92,7 +93,7 @@ $result = $stmt->get_result();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard | Class Cloud</title>
+    <title>Admin/Instructor Dashboard | Class Cloud</title>
     <!-- External Libraries -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
@@ -171,7 +172,7 @@ $result = $stmt->get_result();
     <!-- Navbar -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container-fluid">
-            <a class="navbar-brand" href="#">Class Cloud - Admin Dashboard</a>
+            <a class="navbar-brand" href="#">Class Cloud - Admin/Instructor Dashboard</a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
@@ -210,14 +211,14 @@ $result = $stmt->get_result();
         </div>
 
         <div class="step-container" id="step2">
-            <h4>Semester</h4>
-            <input type="text" class="form-control" name="semester" id="semester" required placeholder="Enter semester">
+            <h4>Year</h4>
+            <input type="text" class="form-control" name="year" id="year" required placeholder="Enter year">
             <button type="button" class="btn btn-primary next-btn" onclick="nextStep(3)">Next</button>
         </div>
 
         <div class="step-container" id="step3">
-            <h4>Year</h4>
-            <input type="text" class="form-control" name="year" id="year" required placeholder="Enter year">
+            <h4>Semester</h4>
+            <input type="text" class="form-control" name="semester" id="semester" required placeholder="Enter semester">
             <button type="button" class="btn btn-primary next-btn" onclick="nextStep(4)">Next</button>
         </div>
 
@@ -228,12 +229,18 @@ $result = $stmt->get_result();
         </div>
 
         <div class="step-container" id="step5">
-            <h4>Topic</h4>
-            <input type="text" class="form-control" name="topic" id="topic" required placeholder="Enter topic">
+            <h4>Unit</h4>
+            <input type="text" class="form-control" name="unit" id="unit" required placeholder="Enter unit">
             <button type="button" class="btn btn-primary next-btn" onclick="nextStep(6)">Next</button>
         </div>
 
         <div class="step-container" id="step6">
+            <h4>Topic</h4>
+            <input type="text" class="form-control" name="topic" id="topic" required placeholder="Enter topic">
+            <button type="button" class="btn btn-primary next-btn" onclick="nextStep(7)">Next</button>
+        </div>
+
+        <div class="step-container" id="step7">
             <h4>Notes (Upload PDF/PPT or Paste Link)</h4>
             <input type="file" class="form-control" name="notes_file" id="notes_file" accept=".pdf,.ppt,.pptx">
             <p>OR</p>
@@ -249,9 +256,10 @@ $result = $stmt->get_result();
             <thead>
                 <tr>
                     <th>Course Name</th>
-                    <th>Semester</th>
                     <th>Year</th>
+                    <th>Semester</th>
                     <th>Subject</th>
+                    <th>Unit</th>
                     <th>Topic</th>
                     <th>Notes</th>
                     <th>Action</th>
@@ -261,9 +269,10 @@ $result = $stmt->get_result();
                 <?php while ($course = $result->fetch_assoc()): ?>
                     <tr>
                         <td><?php echo htmlspecialchars($course['course_name']); ?></td>
-                        <td><?php echo htmlspecialchars($course['semester']); ?></td>
                         <td><?php echo htmlspecialchars($course['year']); ?></td>
+                        <td><?php echo htmlspecialchars($course['semester']); ?></td>
                         <td><?php echo htmlspecialchars($course['subject']); ?></td>
+                        <td><?php echo htmlspecialchars($course['unit']); ?></td>
                         <td><?php echo htmlspecialchars($course['topic']); ?></td>
                         <td>
                             <?php
@@ -304,38 +313,27 @@ $result = $stmt->get_result();
             // Collect form data
             var courseData = new FormData();
             courseData.append('course_name', $('#course_name').val());
-            courseData.append('semester', $('#semester').val());
             courseData.append('year', $('#year').val());
+            courseData.append('semester', $('#semester').val());
             courseData.append('subject', $('#subject').val());
+            courseData.append('unit', $('#unit').val());
             courseData.append('topic', $('#topic').val());
-            courseData.append('notes_link', $('#notes_link').val());
             courseData.append('notes_file', $('#notes_file')[0].files[0]);
+            courseData.append('notes_link', $('#notes_link').val());
             courseData.append('add_course', true);
 
-            // Perform AJAX request
             $.ajax({
                 url: 'courses.php',
                 type: 'POST',
                 data: courseData,
-                processData: false,
                 contentType: false,
+                processData: false,
                 success: function(response) {
-                    // Show success message
-                    Swal.fire({
-                        icon: 'success',
-                        title: 'Course Added',
-                        text: 'Your course has been successfully added!',
-                    }).then(() => {
-                        location.reload();
-                    });
+                    // Display success message
+                    Swal.fire('Success', 'Course added successfully!', 'success');
                 },
                 error: function() {
-                    // Show error message
-                    Swal.fire({
-                        icon: 'error',
-                        title: 'Error',
-                        text: 'There was an error adding the course.',
-                    });
+                    Swal.fire('Error', 'There was an issue adding the course.', 'error');
                 }
             });
         }

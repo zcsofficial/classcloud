@@ -38,7 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 } elseif ($user['role'] === 'instructor') {
                     header("Location: dashboard.php");
                 } elseif ($user['role'] === 'learner') {
-                    header("Location: dashboard.php");
+                    header("Location: learners_dashboard.php");
                 }
                 exit();
             }

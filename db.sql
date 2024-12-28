@@ -16,12 +16,13 @@ CREATE TABLE users (
 CREATE TABLE courses (
     id INT AUTO_INCREMENT PRIMARY KEY,
     course_name VARCHAR(255) NOT NULL,
-    semester VARCHAR(100) NOT NULL,
-    year VARCHAR(100) NOT NULL,
+    year VARCHAR(10) NOT NULL,
+    semester VARCHAR(10) NOT NULL,
     subject VARCHAR(255) NOT NULL,
-    topic TEXT NOT NULL,
-    notes TEXT NOT NULL,
-    college_code VARCHAR(50) NOT NULL,
+    unit VARCHAR(255) NOT NULL,
+    topic VARCHAR(255) NOT NULL,
+    notes VARCHAR(255) NOT NULL,  -- This will store the file path or link
+    college_code VARCHAR(20) NOT NULL,  -- This links to the college or user
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

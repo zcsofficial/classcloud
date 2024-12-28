@@ -114,6 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         .form-container .btn-primary {
             background: #6e8efb;
             border: none;
+            border-radius: 10px;
         }
         .form-container .btn-primary:hover {
             background: #5a76d6;
@@ -138,6 +139,25 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             text-align: center;
             margin-top: 1rem;
         }
+
+        /* Mobile Responsiveness */
+        @media (max-width: 576px) {
+            .form-container {
+                padding: 1.5rem;
+                max-width: 100%;
+            }
+        }
+
+        /* Button Focus State */
+        .btn-primary:focus {
+            box-shadow: 0 0 0 0.25rem rgba(110, 142, 251, 0.5);
+        }
+
+        /* Disabled Input Style */
+        .form-control:disabled {
+            background-color: #f0f0f0;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -156,6 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 <div class="mb-3">
                     <label for="role" class="form-label">Role</label>
                     <select class="form-select" id="role" name="role" required>
+                        <option value="none">None</option>
                         <option value="learner">Learner</option>
                         <option value="instructor">Instructor</option>
                         <option value="college">College Admin</option>
@@ -184,7 +205,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
                 <div class="mb-3">
                     <label for="collegeCode" class="form-label">College Code</label>
-                    <input type="text" class="form-control" id="collegeCode" name="collegeCode" >
+                    <input type="text" class="form-control" id="collegeCode" name="collegeCode">
                 </div>
 
                 <button type="submit" class="btn btn-primary w-100">Register</button>
