@@ -14,76 +14,78 @@ $messageType = '';
 
 // Handle account approval or rejection
 if (isset($_GET['action']) && isset($_GET['user_id'])) {
-    $userId = $_GET['user_id'];
-    $action = $_GET['action'];
+    $userId = filter_input(INPUT_GET, 'user_id', FILTER_SANITIZE_NUMBER_INT);
+    $action = filter_input(INPUT_GET, 'action', FILTER_SANITIZE_STRING);
 
-    if ($action === 'approve') {
-        // Display role selection form when approving
+    if ($action === 'approve' && isset($_POST['role'])) {
+        $role = filter_input(INPUT_POST, 'role', FILTER_SANITIZE_STRING);
         $stmt = $conn->prepare("UPDATE users SET role = ? WHERE id = ? AND role = 'approval'");
-        if (isset($_POST['role'])) {
-            $role = $_POST['role'];
-            $stmt->bind_param("si", $role, $userId);
-            if ($stmt->execute()) {
-                $message = "User approved and role updated to $role!";
-                $messageType = 'success';
-            } else {
-                $message = "Error approving user: " . $stmt->error;
-                $messageType = 'danger';
-            }
+        $stmt->bind_param("si", $role, $userId);
+        if ($stmt->execute() && $stmt->affected_rows > 0) {
+            $message = "User approved and role updated to $role!";
+            $messageType = 'success';
+        } else {
+            $message = "Error approving user or no changes made.";
+            $messageType = 'danger';
         }
+        $stmt->close();
     } elseif ($action === 'reject') {
-        $stmt = $conn->prepare("DELETE FROM users WHERE id = ? AND role = 'approval'");
-        $stmt->bind_param("i", $userId);
-        if ($stmt->execute()) {
+        $stmt = $conn->prepare("DELETE FROM users WHERE id = ? AND college_code = ?");
+        $stmt->bind_param("is", $userId, $_SESSION['college_code']);
+        if ($stmt->execute() && $stmt->affected_rows > 0) {
             $message = "User rejected and removed.";
             $messageType = 'warning';
         } else {
-            $message = "Error rejecting user: " . $stmt->error;
+            $message = "Error rejecting user or user not found.";
             $messageType = 'danger';
         }
+        $stmt->close();
     }
 }
 
 // Handle user role update (edit user)
 if (isset($_POST['edit_user'])) {
-    $userId = $_POST['user_id'];
-    $newRole = $_POST['new_role'];
-    $stmt = $conn->prepare("UPDATE users SET role = ? WHERE id = ?");
-    $stmt->bind_param("si", $newRole, $userId);
-    if ($stmt->execute()) {
+    $userId = filter_input(INPUT_POST, 'user_id', FILTER_SANITIZE_NUMBER_INT);
+    $newRole = filter_input(INPUT_POST, 'new_role', FILTER_SANITIZE_STRING);
+    $stmt = $conn->prepare("UPDATE users SET role = ? WHERE id = ? AND college_code = ? AND role != 'admin'");
+    $stmt->bind_param("sis", $newRole, $userId, $_SESSION['college_code']);
+    if ($stmt->execute() && $stmt->affected_rows > 0) {
         $message = "User role updated successfully!";
         $messageType = 'success';
     } else {
-        $message = "Error updating user role: " . $stmt->error;
+        $message = "Error updating user role or no changes made.";
         $messageType = 'danger';
     }
+    $stmt->close();
 }
 
 // Fetch all users with approval status
 $stmt = $conn->prepare("SELECT * FROM users WHERE role = 'approval' AND college_code = ?");
 $stmt->bind_param("s", $_SESSION['college_code']);
 $stmt->execute();
-$result = $stmt->get_result();
+$pendingUsers = $stmt->get_result();
+$stmt->close();
 
 // Fetch all users for role editing
 $stmtAllUsers = $conn->prepare("SELECT * FROM users WHERE role != 'admin' AND college_code = ?");
 $stmtAllUsers->bind_param("s", $_SESSION['college_code']);
 $stmtAllUsers->execute();
 $allUsers = $stmtAllUsers->get_result();
+$stmtAllUsers->close();
 
 // Fetch counts for students and instructors
-$collegeCode = $_SESSION['college_code']; // Assuming college_code is stored in session
+$collegeCode = $_SESSION['college_code'];
 $stmtStudentCount = $conn->prepare("SELECT COUNT(*) AS student_count FROM users WHERE role = 'learner' AND college_code = ?");
 $stmtStudentCount->bind_param("s", $collegeCode);
 $stmtStudentCount->execute();
-$studentCountResult = $stmtStudentCount->get_result();
-$studentCount = $studentCountResult->fetch_assoc()['student_count'];
+$studentCount = $stmtStudentCount->get_result()->fetch_assoc()['student_count'];
+$stmtStudentCount->close();
 
 $stmtInstructorCount = $conn->prepare("SELECT COUNT(*) AS instructor_count FROM users WHERE role = 'instructor' AND college_code = ?");
 $stmtInstructorCount->bind_param("s", $collegeCode);
 $stmtInstructorCount->execute();
-$instructorCountResult = $stmtInstructorCount->get_result();
-$instructorCount = $instructorCountResult->fetch_assoc()['instructor_count'];
+$instructorCount = $stmtInstructorCount->get_result()->fetch_assoc()['instructor_count'];
+$stmtInstructorCount->close();
 ?>
 
 <!DOCTYPE html>
@@ -91,197 +93,179 @@ $instructorCount = $instructorCountResult->fetch_assoc()['instructor_count'];
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard | Class Cloud</title>
-    <!-- External Libraries -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <title>Admin Dashboard | ClassCloud</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#FF7F50',
+                        secondary: '#FFA07A'
+                    },
+                    borderRadius: {
+                        'button': '8px'
+                    }
+                }
+            }
+        }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-    <style>
-        body {
-            background: linear-gradient(135deg, #6e8efb, #a777e3);
-            font-family: 'Roboto', sans-serif;
-            margin: 0;
-        }
-        .container {
-            max-width: 1200px;
-            margin-top: 20px;
-        }
-        .card-container {
-            display: flex;
-            justify-content: space-around;
-            margin-top: 30px;
-        }
-        .card {
-            width: 250px;
-            height: 150px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-            border-radius: 10px;
-        }
-        .card i {
-            font-size: 50px;
-        }
-        .table-container {
-            max-height: 500px;
-            overflow-y: auto;
-        }
-        .alert {
-            font-weight: 600;
-        }
-        .btn-primary {
-            background: #6e8efb;
-            border: none;
-        }
-        .btn-primary:hover {
-            background: #5a76d6;
-        }
-        .btn-danger {
-            background: #f44336;
-            border: none;
-        }
-        .btn-danger:hover {
-            background: #e53935;
-        }
-        .btn-warning {
-            background: #ff9800;
-            border: none;
-        }
-        .btn-warning:hover {
-            background: #fb8c00;
-        }
-    </style>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.5.0/fonts/remixicon.css" rel="stylesheet">
 </head>
-<body>
+<body class="bg-[#FFFAF0] font-['Roboto'] min-h-screen">
     <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="#">Class Cloud - Admin Dashboard</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav">
-                    <li class="nav-item">
-                        <a class="nav-link active" href="admin.php">Dashboard</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link active" href="courses.php">Courses</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="logout.php">Logout</a>
-                    </li>
-                </ul>
+    <nav class="bg-gray-900 text-white p-4 shadow-md">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <a href="#" class="text-2xl font-bold">ClassCloud - Admin</a>
+            <div class="hidden md:flex space-x-6">
+                <a href="admin.php" class="hover:text-primary">Dashboard</a>
+                <a href="courses.php" class="hover:text-primary">Courses</a>
+                <a href="logout.php" class="hover:text-primary">Logout</a>
             </div>
+            <button id="mobile-menu-btn" class="md:hidden text-2xl">
+                <i class="ri-menu-line"></i>
+            </button>
+        </div>
+        <div id="mobile-menu" class="hidden md:hidden mt-4 space-y-2">
+            <a href="admin.php" class="block text-white hover:text-primary py-2 px-4">Dashboard</a>
+            <a href="courses.php" class="block text-white hover:text-primary py-2 px-4">Courses</a>
+            <a href="logout.php" class="block text-white hover:text-primary py-2 px-4">Logout</a>
         </div>
     </nav>
 
     <!-- Message Display -->
     <?php if ($message): ?>
-        <div class="container mt-3">
-            <div class="alert alert-<?php echo $messageType; ?>" role="alert">
-                <?php echo $message; ?>
+        <div class="max-w-7xl mx-auto mt-4 px-4">
+            <div class="p-4 rounded-lg text-white <?php echo $messageType === 'success' ? 'bg-green-500' : ($messageType === 'warning' ? 'bg-yellow-500' : 'bg-red-500'); ?>">
+                <?php echo htmlspecialchars($message); ?>
             </div>
         </div>
     <?php endif; ?>
 
-    <!-- User Approval -->
-    <div class="container mt-5 table-container">
-        <h2 class="text-center">User Approval</h2>
-        <table class="table table-bordered mt-3">
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>College Code</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php while ($user = $result->fetch_assoc()): ?>
-                    <tr>
-                        <td><?php echo htmlspecialchars($user['name']); ?></td>
-                        <td><?php echo htmlspecialchars($user['email']); ?></td>
-                        <td><?php echo htmlspecialchars($user['college_code']); ?></td>
-                        <td>
-                            <a href="admin.php?action=approve&user_id=<?php echo $user['id']; ?>" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#approveModal<?php echo $user['id']; ?>">Approve</a>
-                            <a href="admin.php?action=reject&user_id=<?php echo $user['id']; ?>" class="btn btn-danger btn-sm">Reject</a>
-                        </td>
-                    </tr>
+    <!-- Dashboard Stats -->
+    <div class="max-w-7xl mx-auto mt-8 px-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div class="bg-white p-6 rounded-lg shadow-lg text-center">
+                <i class="ri-user-3-line text-primary text-4xl mb-4"></i>
+                <h3 class="text-xl font-semibold text-gray-900">Students</h3>
+                <p class="text-3xl font-bold text-primary"><?php echo $studentCount; ?></p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow-lg text-center">
+                <i class="ri-user-settings-line text-primary text-4xl mb-4"></i>
+                <h3 class="text-xl font-semibold text-gray-900">Instructors</h3>
+                <p class="text-3xl font-bold text-primary"><?php echo $instructorCount; ?></p>
+            </div>
+        </div>
+    </div>
 
-                    <!-- Modal for Approve Role Selection -->
-                    <div class="modal fade" id="approveModal<?php echo $user['id']; ?>" tabindex="-1" aria-labelledby="approveModalLabel<?php echo $user['id']; ?>" aria-hidden="true">
-                        <div class="modal-dialog">
-                            <div class="modal-content">
-                                <div class="modal-header">
-                                    <h5 class="modal-title" id="approveModalLabel<?php echo $user['id']; ?>">Assign Role to <?php echo htmlspecialchars($user['name']); ?></h5>
-                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                                </div>
-                                <div class="modal-body">
-                                    <form method="POST" action="admin.php?action=approve&user_id=<?php echo $user['id']; ?>">
-                                        <div class="mb-3">
-                                            <label for="role" class="form-label">Select Role</label>
-                                            <select class="form-select" id="role" name="role" required>
-                                                <option value="learner">Learner</option>
-                                                <option value="instructor">Instructor</option>
-                                            </select>
-                                        </div>
-                                        <button type="submit" class="btn btn-primary">Approve</button>
-                                    </form>
-                                </div>
+    <!-- User Approval -->
+    <div class="max-w-7xl mx-auto mt-8 px-4">
+        <h2 class="text-2xl font-bold text-gray-900 mb-4">User Approval</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full bg-white shadow-lg rounded-lg">
+                <thead class="bg-gray-100">
+                    <tr>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Name</th>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Email</th>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">College Code</th>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php while ($user = $pendingUsers->fetch_assoc()): ?>
+                        <tr class="border-t">
+                            <td class="p-4"><?php echo htmlspecialchars($user['name']); ?></td>
+                            <td class="p-4"><?php echo htmlspecialchars($user['email']); ?></td>
+                            <td class="p-4"><?php echo htmlspecialchars($user['college_code']); ?></td>
+                            <td class="p-4 flex space-x-2">
+                                <button class="bg-green-500 text-white px-4 py-2 rounded-button hover:bg-green-600" data-modal-target="approveModal<?php echo $user['id']; ?>">Approve</button>
+                                <a href="admin.php?action=reject&user_id=<?php echo $user['id']; ?>" class="bg-red-500 text-white px-4 py-2 rounded-button hover:bg-red-600">Reject</a>
+                            </td>
+                        </tr>
+                        <!-- Modal for Approve Role Selection -->
+                        <div id="approveModal<?php echo $user['id']; ?>" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center">
+                            <div class="bg-white p-6 rounded-lg shadow-lg max-w-sm w-full">
+                                <h3 class="text-xl font-bold text-gray-900 mb-4">Assign Role to <?php echo htmlspecialchars($user['name']); ?></h3>
+                                <form method="POST" action="admin.php?action=approve&user_id=<?php echo $user['id']; ?>">
+                                    <div class="mb-4">
+                                        <label for="role<?php echo $user['id']; ?>" class="block text-sm font-medium text-gray-700">Select Role</label>
+                                        <select id="role<?php echo $user['id']; ?>" name="role" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" required>
+                                            <option value="learner">Learner</option>
+                                            <option value="instructor">Instructor</option>
+                                        </select>
+                                    </div>
+                                    <div class="flex justify-end space-x-2">
+                                        <button type="button" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-button hover:bg-gray-400" data-modal-close>Cancel</button>
+                                        <button type="submit" class="bg-primary text-white px-4 py-2 rounded-button hover:bg-primary/90">Approve</button>
+                                    </div>
+                                </form>
                             </div>
                         </div>
-                    </div>
-                <?php endwhile; ?>
-            </tbody>
-        </table>
+                    <?php endwhile; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 
-    <!-- User Management (Edit or Delete Users) -->
-    <div class="container mt-5">
-        <h2 class="text-center">Manage Users</h2>
-        <table class="table table-bordered mt-3">
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php while ($user = $allUsers->fetch_assoc()): ?>
+    <!-- User Management -->
+    <div class="max-w-7xl mx-auto mt-8 px-4 mb-8">
+        <h2 class="text-2xl font-bold text-gray-900 mb-4">Manage Users</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full bg-white shadow-lg rounded-lg">
+                <thead class="bg-gray-100">
                     <tr>
-                        <td><?php echo htmlspecialchars($user['name']); ?></td>
-                        <td><?php echo htmlspecialchars($user['email']); ?></td>
-                        <td><?php echo htmlspecialchars($user['role']); ?></td>
-                        <td>
-                            <form method="POST" action="admin.php">
-                                <input type="hidden" name="user_id" value="<?php echo $user['id']; ?>">
-                                <select class="form-select" name="new_role" required>
-                                    <option value="learner" <?php echo ($user['role'] === 'learner') ? 'selected' : ''; ?>>Learner</option>
-                                    <option value="instructor" <?php echo ($user['role'] === 'instructor') ? 'selected' : ''; ?>>Instructor</option>
-                                </select>
-                                <button type="submit" name="edit_user" class="btn btn-warning btn-sm">Edit Role</button>
-                            </form>
-                            <a href="admin.php?action=reject&user_id=<?php echo $user['id']; ?>" class="btn btn-danger btn-sm">Delete</a>
-                        </td>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Name</th>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Email</th>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Role</th>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Action</th>
                     </tr>
-                <?php endwhile; ?>
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    <?php while ($user = $allUsers->fetch_assoc()): ?>
+                        <tr class="border-t">
+                            <td class="p-4"><?php echo htmlspecialchars($user['name']); ?></td>
+                            <td class="p-4"><?php echo htmlspecialchars($user['email']); ?></td>
+                            <td class="p-4"><?php echo htmlspecialchars($user['role']); ?></td>
+                            <td class="p-4 flex space-x-2">
+                                <form method="POST" action="admin.php" class="flex space-x-2">
+                                    <input type="hidden" name="user_id" value="<?php echo $user['id']; ?>">
+                                    <select name="new_role" class="px-2 py-1 border border-gray-300 rounded-button focus:ring-primary focus:border-primary">
+                                        <option value="learner" <?php echo $user['role'] === 'learner' ? 'selected' : ''; ?>>Learner</option>
+                                        <option value="instructor" <?php echo $user['role'] === 'instructor' ? 'selected' : ''; ?>>Instructor</option>
+                                    </select>
+                                    <button type="submit" name="edit_user" class="bg-yellow-500 text-white px-4 py-2 rounded-button hover:bg-yellow-600">Edit</button>
+                                </form>
+                                <a href="admin.php?action=reject&user_id=<?php echo $user['id']; ?>" class="bg-red-500 text-white px-4 py-2 rounded-button hover:bg-red-600">Delete</a>
+                            </td>
+                        </tr>
+                    <?php endwhile; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 
-    <!-- Bootstrap JS and External Libraries -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jquery.counterup2/jquery.counterup.min.js"></script>
     <script>
-        $(document).ready(function () {
-            $('.counter').counterUp({
-                delay: 10,
-                time: 1000
+        // Mobile menu toggle
+        const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+        const mobileMenu = document.getElementById('mobile-menu');
+        mobileMenuBtn.addEventListener('click', () => {
+            mobileMenu.classList.toggle('hidden');
+        });
+
+        // Modal handling
+        document.querySelectorAll('[data-modal-target]').forEach(button => {
+            button.addEventListener('click', () => {
+                const modalId = button.getAttribute('data-modal-target');
+                const modal = document.getElementById(modalId);
+                modal.classList.remove('hidden');
+            });
+        });
+
+        document.querySelectorAll('[data-modal-close]').forEach(button => {
+            button.addEventListener('click', () => {
+                const modal = button.closest('.fixed');
+                modal.classList.add('hidden');
             });
         });
     </script>

@@ -2,7 +2,7 @@
 session_start();
 include 'db.php'; // Database connection
 
-// Check if the user is logged in
+// Check if the user is logged in and is a learner
 if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'learner') {
     header("Location: login.php");
     exit();
@@ -15,91 +15,99 @@ $messageType = '';
 // Fetch college code from session
 $college_code = $_SESSION['college_code'];
 
-// Initialize variables for dynamic content
-$semesters = [];
-$subjects = [];
-$units = [];
-$topics = [];
-$notes = '';
+// Fetch distinct filter options
+$years = $conn->prepare("SELECT DISTINCT year FROM courses WHERE college_code = ? ORDER BY year");
+$years->bind_param("s", $college_code);
+$years->execute();
+$yearsResult = $years->get_result();
+$years->close();
+
+$semesters = $conn->prepare("SELECT DISTINCT semester FROM courses WHERE college_code = ? ORDER BY semester");
+$semesters->bind_param("s", $college_code);
+$semesters->execute();
+$semestersResult = $semesters->get_result();
+$semesters->close();
+
+$subjects = $conn->prepare("SELECT DISTINCT subject FROM courses WHERE college_code = ? ORDER BY subject");
+$subjects->bind_param("s", $college_code);
+$subjects->execute();
+$subjectsResult = $subjects->get_result();
+$subjects->close();
+
+$units = $conn->prepare("SELECT DISTINCT unit FROM courses WHERE college_code = ? ORDER BY unit");
+$units->bind_param("s", $college_code);
+$units->execute();
+$unitsResult = $units->get_result();
+$units->close();
+
+$topics = $conn->prepare("SELECT DISTINCT topic FROM courses WHERE college_code = ? ORDER BY topic");
+$topics->bind_param("s", $college_code);
+$topics->execute();
+$topicsResult = $topics->get_result();
+$topics->close();
 
 // Prepare the base query for fetching courses
 $filterQuery = "SELECT * FROM courses WHERE college_code = ?";
 $filterParams = [$college_code];
+$paramTypes = "s";
 
-// Fetch available years for filtering
-$years = $conn->prepare("SELECT DISTINCT year FROM courses WHERE college_code = ?");
-$years->bind_param("s", $college_code);
-$years->execute();
-$yearsResult = $years->get_result();
-
-// Handle the dynamic filtering options
+// Handle dynamic filtering
 if (isset($_POST['apply_filters'])) {
-    $year = $_POST['year'] ?? '';
-    $semester = $_POST['semester'] ?? '';
-    $subject = $_POST['subject'] ?? '';
-    $unit = $_POST['unit'] ?? '';
-    $topic = $_POST['topic'] ?? '';
+    $year = filter_input(INPUT_POST, 'year', FILTER_SANITIZE_STRING) ?? '';
+    $semester = filter_input(INPUT_POST, 'semester', FILTER_SANITIZE_STRING) ?? '';
+    $subject = filter_input(INPUT_POST, 'subject', FILTER_SANITIZE_STRING) ?? '';
+    $unit = filter_input(INPUT_POST, 'unit', FILTER_SANITIZE_STRING) ?? '';
+    $topic = filter_input(INPUT_POST, 'topic', FILTER_SANITIZE_STRING) ?? '';
 
     if ($year) {
         $filterQuery .= " AND year = ?";
         $filterParams[] = $year;
+        $paramTypes .= "s";
     }
     if ($semester) {
         $filterQuery .= " AND semester = ?";
         $filterParams[] = $semester;
+        $paramTypes .= "s";
     }
     if ($subject) {
         $filterQuery .= " AND subject = ?";
         $filterParams[] = $subject;
+        $paramTypes .= "s";
     }
     if ($unit) {
         $filterQuery .= " AND unit = ?";
         $filterParams[] = $unit;
+        $paramTypes .= "s";
     }
     if ($topic) {
         $filterQuery .= " AND topic = ?";
         $filterParams[] = $topic;
+        $paramTypes .= "s";
     }
 }
 
 $stmt = $conn->prepare($filterQuery);
-if ($filterParams) {
-    $stmt->bind_param(str_repeat("s", count($filterParams)), ...$filterParams);
+if (count($filterParams) > 1) {
+    $stmt->bind_param($paramTypes, ...$filterParams);
+} else {
+    $stmt->bind_param($paramTypes, $college_code);
 }
 $stmt->execute();
 $courses = $stmt->get_result();
+$stmt->close();
 
-// Handle filtering options dynamically
-if (isset($_POST['year'])) {
-    $year = $_POST['year'];
-    $semesters = $conn->prepare("SELECT DISTINCT semester FROM courses WHERE college_code = ? AND year = ?");
-    $semesters->bind_param("ss", $college_code, $year);
-    $semesters->execute();
-    $semestersResult = $semesters->get_result();
-}
-
-if (isset($_POST['semester'])) {
-    $semester = $_POST['semester'];
-    $subjects = $conn->prepare("SELECT DISTINCT subject FROM courses WHERE college_code = ? AND semester = ?");
-    $subjects->bind_param("ss", $college_code, $semester);
-    $subjects->execute();
-    $subjectsResult = $subjects->get_result();
-}
-
-if (isset($_POST['subject'])) {
-    $subject = $_POST['subject'];
-    $units = $conn->prepare("SELECT DISTINCT unit FROM courses WHERE college_code = ? AND subject = ?");
-    $units->bind_param("ss", $college_code, $subject);
-    $units->execute();
-    $unitsResult = $units->get_result();
-}
-
-if (isset($_POST['unit'])) {
-    $unit = $_POST['unit'];
-    $topics = $conn->prepare("SELECT DISTINCT topic FROM courses WHERE college_code = ? AND unit = ?");
-    $topics->bind_param("ss", $college_code, $unit);
-    $topics->execute();
-    $topicsResult = $topics->get_result();
+// Organize courses into a tree structure by year and semester
+$courseTree = [];
+while ($course = $courses->fetch_assoc()) {
+    $year = $course['year'];
+    $semester = $course['semester'];
+    if (!isset($courseTree[$year])) {
+        $courseTree[$year] = [];
+    }
+    if (!isset($courseTree[$year][$semester])) {
+        $courseTree[$year][$semester] = [];
+    }
+    $courseTree[$year][$semester][] = $course;
 }
 ?>
 
@@ -108,191 +116,186 @@ if (isset($_POST['unit'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Learner Dashboard | Class Cloud</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <title>Learner Dashboard | ClassCloud</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#FF7F50',
+                        secondary: '#FFA07A'
+                    },
+                    borderRadius: {
+                        'button': '8px'
+                    }
+                }
+            }
+        }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.5.0/fonts/remixicon.css" rel="stylesheet">
     <style>
-        body {
-            background: linear-gradient(135deg, #6e8efb, #a777e3);
-            font-family: 'Roboto', sans-serif;
-            margin: 0;
+        .tree-node {
+            cursor: pointer;
         }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
+        .tree-node:hover {
+            background-color: #f5f5f5;
         }
-        .card-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            gap: 20px;
-            justify-items: center;
+        .tree-child {
+            display: none;
         }
-        .card {
-            width: 100%;
-            margin-bottom: 20px;
-            transition: transform 0.3s ease-in-out;
-        }
-        .card:hover {
-            transform: scale(1.05);
-        }
-        .card-body {
-            background-color: #fff;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-        }
-        .card-title {
-            font-size: 1.2rem;
-            font-weight: 500;
-        }
-        .btn-primary {
-            background: #6e8efb;
-            border: none;
-        }
-        .btn-primary:hover {
-            background: #5a76d6;
-        }
-        .btn-danger {
-            background: #f44336;
-            border: none;
-        }
-        .btn-danger:hover {
-            background: #e53935;
-        }
-        .btn-warning {
-            background: #ff9800;
-            border: none;
-        }
-        .btn-warning:hover {
-            background: #fb8c00;
-        }
-        .navbar {
-            background-color: #333;
-        }
-        .navbar-brand {
-            font-weight: bold;
-        }
-        .navbar-nav .nav-link {
-            color: #fff !important;
-        }
-        .navbar-nav .nav-link:hover {
-            color: #f0a500 !important;
+        .tree-child.active {
+            display: block;
         }
     </style>
 </head>
-<body>
+<body class="bg-[#FFFAF0] font-['Roboto'] min-h-screen">
     <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="#">Class Cloud - Learner Dashboard</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav">
-                    <li class="nav-item">
-                        <a class="nav-link active" href="learners_dashboard.php">Dashboard</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="logout.php">Logout</a>
-                    </li>
-                </ul>
+    <nav class="bg-gray-900 text-white p-4 shadow-md">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <a href="#" class="text-2xl font-bold">ClassCloud - Learner</a>
+            <div class="hidden md:flex space-x-6">
+                <a href="learners_dashboard.php" class="hover:text-primary">Dashboard</a>
+                <a href="logout.php" class="hover:text-primary">Logout</a>
             </div>
+            <button id="mobile-menu-btn" class="md:hidden text-2xl">
+                <i class="ri-menu-line"></i>
+            </button>
+        </div>
+        <div id="mobile-menu" class="hidden md:hidden mt-4 space-y-2">
+            <a href="learners_dashboard.php" class="block text-white hover:text-primary py-2 px-4">Dashboard</a>
+            <a href="logout.php" class="block text-white hover:text-primary py-2 px-4">Logout</a>
         </div>
     </nav>
 
-    <!-- Courses List (Learner) -->
-    <div class="container mt-5">
-        <h2 class="text-center text-white">Available Courses</h2>
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto mt-8 px-4 mb-8">
+        <h2 class="text-2xl font-bold text-gray-900 mb-4 text-center">Available Courses</h2>
 
         <!-- Filter Form -->
-        <form method="POST" id="filter-form">
-            <div class="row">
-                <div class="col-md-3">
-                    <select name="year" id="year" class="form-select" aria-label="Select Year">
-                        <option value="">Select Year</option>
+        <form method="POST" class="bg-white p-6 rounded-lg shadow-lg mb-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                <div>
+                    <label for="year" class="block text-sm font-medium text-gray-700">Year</label>
+                    <select id="year" name="year" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary">
+                        <option value="">All Years</option>
                         <?php while ($yearRow = $yearsResult->fetch_assoc()): ?>
-                            <option value="<?php echo $yearRow['year']; ?>" <?php echo (isset($_POST['year']) && $_POST['year'] == $yearRow['year']) ? 'selected' : ''; ?>>
-                                <?php echo $yearRow['year']; ?>
+                            <option value="<?php echo htmlspecialchars($yearRow['year']); ?>" <?php echo (isset($_POST['year']) && $_POST['year'] === $yearRow['year']) ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($yearRow['year']); ?>
                             </option>
                         <?php endwhile; ?>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <select name="semester" id="semester" class="form-select" aria-label="Select Semester">
-                        <option value="">Select Semester</option>
-                        <?php if (isset($semestersResult)): ?>
-                            <?php while ($semesterRow = $semestersResult->fetch_assoc()): ?>
-                                <option value="<?php echo $semesterRow['semester']; ?>" <?php echo (isset($_POST['semester']) && $_POST['semester'] == $semesterRow['semester']) ? 'selected' : ''; ?>>
-                                    <?php echo $semesterRow['semester']; ?>
-                                </option>
-                            <?php endwhile; ?>
-                        <?php endif; ?>
+                <div>
+                    <label for="semester" class="block text-sm font-medium text-gray-700">Semester</label>
+                    <select id="semester" name="semester" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary">
+                        <option value="">All Semesters</option>
+                        <?php while ($semesterRow = $semestersResult->fetch_assoc()): ?>
+                            <option value="<?php echo htmlspecialchars($semesterRow['semester']); ?>" <?php echo (isset($_POST['semester']) && $_POST['semester'] === $semesterRow['semester']) ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($semesterRow['semester']); ?>
+                            </option>
+                        <?php endwhile; ?>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <select name="subject" id="subject" class="form-select" aria-label="Select Subject">
-                        <option value="">Select Subject</option>
-                        <?php if (isset($subjectsResult)): ?>
-                            <?php while ($subjectRow = $subjectsResult->fetch_assoc()): ?>
-                                <option value="<?php echo $subjectRow['subject']; ?>" <?php echo (isset($_POST['subject']) && $_POST['subject'] == $subjectRow['subject']) ? 'selected' : ''; ?>>
-                                    <?php echo $subjectRow['subject']; ?>
-                                </option>
-                            <?php endwhile; ?>
-                        <?php endif; ?>
+                <div>
+                    <label for="subject" class="block text-sm font-medium text-gray-700">Subject</label>
+                    <select id="subject" name="subject" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary">
+                        <option value="">All Subjects</option>
+                        <?php while ($subjectRow = $subjectsResult->fetch_assoc()): ?>
+                            <option value="<?php echo htmlspecialchars($subjectRow['subject']); ?>" <?php echo (isset($_POST['subject']) && $_POST['subject'] === $subjectRow['subject']) ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($subjectRow['subject']); ?>
+                            </option>
+                        <?php endwhile; ?>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <select name="unit" id="unit" class="form-select" aria-label="Select Unit">
-                        <option value="">Select Unit</option>
-                        <?php if (isset($unitsResult)): ?>
-                            <?php while ($unitRow = $unitsResult->fetch_assoc()): ?>
-                                <option value="<?php echo $unitRow['unit']; ?>" <?php echo (isset($_POST['unit']) && $_POST['unit'] == $unitRow['unit']) ? 'selected' : ''; ?>>
-                                    <?php echo $unitRow['unit']; ?>
-                                </option>
-                            <?php endwhile; ?>
-                        <?php endif; ?>
+                <div>
+                    <label for="unit" class="block text-sm font-medium text-gray-700">Unit</label>
+                    <select id="unit" name="unit" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary">
+                        <option value="">All Units</option>
+                        <?php while ($unitRow = $unitsResult->fetch_assoc()): ?>
+                            <option value="<?php echo htmlspecialchars($unitRow['unit']); ?>" <?php echo (isset($_POST['unit']) && $_POST['unit'] === $unitRow['unit']) ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($unitRow['unit']); ?>
+                            </option>
+                        <?php endwhile; ?>
+                    </select>
+                </div>
+                <div>
+                    <label for="topic" class="block text-sm font-medium text-gray-700">Topic</label>
+                    <select id="topic" name="topic" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary">
+                        <option value="">All Topics</option>
+                        <?php while ($topicRow = $topicsResult->fetch_assoc()): ?>
+                            <option value="<?php echo htmlspecialchars($topicRow['topic']); ?>" <?php echo (isset($_POST['topic']) && $_POST['topic'] === $topicRow['topic']) ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($topicRow['topic']); ?>
+                            </option>
+                        <?php endwhile; ?>
                     </select>
                 </div>
             </div>
-            <div class="row mt-3">
-                <div class="col-md-3">
-                    <select name="topic" id="topic" class="form-select" aria-label="Select Topic">
-                        <option value="">Select Topic</option>
-                        <?php if (isset($topicsResult)): ?>
-                            <?php while ($topicRow = $topicsResult->fetch_assoc()): ?>
-                                <option value="<?php echo $topicRow['topic']; ?>" <?php echo (isset($_POST['topic']) && $_POST['topic'] == $topicRow['topic']) ? 'selected' : ''; ?>>
-                                    <?php echo $topicRow['topic']; ?>
-                                </option>
-                            <?php endwhile; ?>
-                        <?php endif; ?>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <button type="submit" class="btn btn-warning" name="apply_filters">Apply</button>
-                </div>
-            </div>
+            <button type="submit" name="apply_filters" class="mt-4 w-full bg-primary text-white px-6 py-3 rounded-button hover:bg-primary/90 transition-all font-semibold">Apply Filters</button>
         </form>
 
-        <!-- Courses List -->
-        <div class="card-container mt-4">
-            <?php if ($courses->num_rows > 0): ?>
-                <?php while ($course = $courses->fetch_assoc()): ?>
-                    <div class="card">
-                        <div class="card-body">
-                            <h5 class="card-title"><?php echo $course['course_name']; ?></h5>
-                            <p class="card-text">Year: <?php echo $course['year']; ?> | Semester: <?php echo $course['semester']; ?></p>
-                            <a href="course_details.php?course_id=<?php echo $course['id']; ?>" class="btn btn-primary">Select Course</a>
+        <!-- Tree-like Course List -->
+        <div class="bg-white p-6 rounded-lg shadow-lg">
+            <?php if (!empty($courseTree)): ?>
+                <?php foreach ($courseTree as $year => $semesters): ?>
+                    <div class="tree-node p-2">
+                        <div class="flex items-center">
+                            <i class="ri-arrow-right-s-line text-primary text-xl"></i>
+                            <span class="font-semibold text-gray-900"><?php echo htmlspecialchars($year); ?></span>
+                        </div>
+                        <div class="tree-child pl-6">
+                            <?php foreach ($semesters as $semester => $courses): ?>
+                                <div class="tree-node p-2">
+                                    <div class="flex items-center">
+                                        <i class="ri-arrow-right-s-line text-primary text-xl"></i>
+                                        <span class="font-medium text-gray-700"><?php echo htmlspecialchars($semester); ?></span>
+                                    </div>
+                                    <div class="tree-child pl-6">
+                                        <?php foreach ($courses as $course): ?>
+                                            <div class="p-4 border-t border-gray-200">
+                                                <h3 class="text-lg font-semibold text-gray-900"><?php echo htmlspecialchars($course['course_name']); ?></h3>
+                                                <p class="text-gray-600">Subject: <?php echo htmlspecialchars($course['subject']); ?></p>
+                                                <p class="text-gray-600">Unit: <?php echo htmlspecialchars($course['unit']); ?></p>
+                                                <p class="text-gray-600">Topic: <?php echo htmlspecialchars($course['topic']); ?></p>
+                                                <div class="mt-2 flex space-x-2">
+                                                    <a href="<?php echo filter_var($course['notes'], FILTER_VALIDATE_URL) ? htmlspecialchars($course['notes']) : htmlspecialchars($course['notes']); ?>" target="_blank" class="text-primary hover:underline">View Notes</a>
+                                                    <a href="course_details.php?course_id=<?php echo $course['id']; ?>" class="bg-primary text-white px-4 py-1 rounded-button hover:bg-primary/90 transition-all">Select</a>
+                                                </div>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
                         </div>
                     </div>
-                <?php endwhile; ?>
+                <?php endforeach; ?>
             <?php else: ?>
-                <p class="text-center text-white">No courses found for the selected filters.</p>
+                <p class="text-center text-gray-700 py-4">No courses found for the selected filters.</p>
             <?php endif; ?>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Mobile menu toggle
+        const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+        const mobileMenu = document.getElementById('mobile-menu');
+        mobileMenuBtn.addEventListener('click', () => {
+            mobileMenu.classList.toggle('hidden');
+        });
+
+        // Tree node toggle
+        document.querySelectorAll('.tree-node').forEach(node => {
+            node.addEventListener('click', (e) => {
+                const child = node.querySelector('.tree-child');
+                if (child && e.target.tagName !== 'A') { // Prevent toggling when clicking links
+                    child.classList.toggle('active');
+                    const arrow = node.querySelector('.ri-arrow-right-s-line');
+                    arrow.classList.toggle('ri-arrow-down-s-line');
+                    arrow.classList.toggle('ri-arrow-right-s-line');
+                }
+            });
+        });
+    </script>
 </body>
 </html>

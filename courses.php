@@ -14,78 +14,89 @@ $messageType = '';
 
 // Handle adding a new course
 if (isset($_POST['add_course'])) {
-    $courseName = $_POST['course_name'];
-    $year = $_POST['year'];
-    $semester = $_POST['semester'];
-    $subject = $_POST['subject'];
-    $unit = $_POST['unit'];
-    $topic = $_POST['topic'];
+    $courseName = filter_input(INPUT_POST, 'course_name', FILTER_SANITIZE_STRING);
+    $year = filter_input(INPUT_POST, 'year', FILTER_SANITIZE_STRING);
+    $semester = filter_input(INPUT_POST, 'semester', FILTER_SANITIZE_STRING);
+    $subject = filter_input(INPUT_POST, 'subject', FILTER_SANITIZE_STRING);
+    $unit = filter_input(INPUT_POST, 'unit', FILTER_SANITIZE_STRING);
+    $topic = filter_input(INPUT_POST, 'topic', FILTER_SANITIZE_STRING);
+    $notesLink = filter_input(INPUT_POST, 'notes_link', FILTER_SANITIZE_URL);
     $notes = '';
 
-    // Handle file upload
-    if ($_FILES['notes_file']['error'] === UPLOAD_ERR_OK) {
-        $fileTmpPath = $_FILES['notes_file']['tmp_name'];
-        $fileName = $_FILES['notes_file']['name'];
-        $fileSize = $_FILES['notes_file']['size'];
-        $fileType = $_FILES['notes_file']['type'];
-        $fileNameCmps = explode(".", $fileName);
-        $fileExtension = strtolower(end($fileNameCmps));
-        
-        // Validate file type
-        $allowedExtensions = ['pdf', 'ppt', 'pptx'];
-        if (in_array($fileExtension, $allowedExtensions)) {
-            $uploadDir = 'uploads/';
-            $newFileName = md5(time() . $fileName) . '.' . $fileExtension;
-            $destPath = $uploadDir . $newFileName;
-            
-            if (move_uploaded_file($fileTmpPath, $destPath)) {
-                $notes = $destPath; // Store the file path in the database
+    // Validate required fields
+    if (empty($courseName) || empty($year) || empty($semester) || empty($subject) || empty($unit) || empty($topic)) {
+        $message = "All fields are required.";
+        $messageType = 'danger';
+    } else {
+        // Handle file upload
+        if ($_FILES['notes_file']['error'] === UPLOAD_ERR_OK) {
+            $fileTmpPath = $_FILES['notes_file']['tmp_name'];
+            $fileName = $_FILES['notes_file']['name'];
+            $fileSize = $_FILES['notes_file']['size'];
+            $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+            $allowedExtensions = ['pdf', 'ppt', 'pptx'];
+
+            if (in_array($fileExtension, $allowedExtensions)) {
+                $uploadDir = 'uploads/';
+                if (!is_dir($uploadDir)) {
+                    mkdir($uploadDir, 0755, true);
+                }
+                $newFileName = md5(time() . $fileName) . '.' . $fileExtension;
+                $destPath = $uploadDir . $newFileName;
+
+                if (move_uploaded_file($fileTmpPath, $destPath)) {
+                    $notes = $destPath;
+                } else {
+                    $message = "Error uploading the file.";
+                    $messageType = 'danger';
+                }
             } else {
-                $message = "There was an error uploading the file.";
+                $message = "Only PDF, PPT, and PPTX files are allowed.";
                 $messageType = 'danger';
             }
+        } elseif (!empty($notesLink)) {
+            $notes = $notesLink;
         } else {
-            $message = "Only PDF, PPT, and PPTX files are allowed.";
+            $message = "Please provide either a file or a link for notes.";
             $messageType = 'danger';
         }
-    } elseif (!empty($_POST['notes_link'])) {
-        // If a link is provided, use it as the notes
-        $notes = $_POST['notes_link'];
-    }
 
-    if ($notes) {
-        // Insert course data into the database
-        $stmt = $conn->prepare("INSERT INTO courses (course_name, year, semester, subject, unit, topic, notes, college_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmt->bind_param("ssssssss", $courseName, $year, $semester, $subject, $unit, $topic, $notes, $_SESSION['college_code']);
-        if ($stmt->execute()) {
-            $message = "Course added successfully!";
-            $messageType = 'success';
-        } else {
-            $message = "Error adding course: " . $stmt->error;
-            $messageType = 'danger';
+        if ($notes && !$message) {
+            $stmt = $conn->prepare("INSERT INTO courses (course_name, year, semester, subject, unit, topic, notes, college_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("ssssssss", $courseName, $year, $semester, $subject, $unit, $topic, $notes, $_SESSION['college_code']);
+            if ($stmt->execute()) {
+                $message = "Course added successfully!";
+                $messageType = 'success';
+            } else {
+                $message = "Error adding course: " . $stmt->error;
+                $messageType = 'danger';
+            }
+            $stmt->close();
         }
     }
 }
 
 // Handle course deletion
-if (isset($_GET['action']) && isset($_GET['course_id']) && $_GET['action'] === 'delete') {
-    $courseId = $_GET['course_id'];
-    $stmt = $conn->prepare("DELETE FROM courses WHERE id = ?");
-    $stmt->bind_param("i", $courseId);
-    if ($stmt->execute()) {
+if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['course_id'])) {
+    $courseId = filter_input(INPUT_GET, 'course_id', FILTER_SANITIZE_NUMBER_INT);
+    $stmt = $conn->prepare("DELETE FROM courses WHERE id = ? AND college_code = ?");
+    $stmt->bind_param("is", $courseId, $_SESSION['college_code']);
+    if ($stmt->execute() && $stmt->affected_rows > 0) {
         $message = "Course deleted successfully!";
         $messageType = 'warning';
     } else {
-        $message = "Error deleting course: " . $stmt->error;
+        $message = "Error deleting course or course not found.";
         $messageType = 'danger';
     }
+    $stmt->close();
 }
 
 // Fetch all courses
 $stmt = $conn->prepare("SELECT * FROM courses WHERE college_code = ?");
 $stmt->bind_param("s", $_SESSION['college_code']);
 $stmt->execute();
-$result = $stmt->get_result();
+$courses = $stmt->get_result();
+$stmt->close();
 ?>
 
 <!DOCTYPE html>
@@ -93,250 +104,148 @@ $result = $stmt->get_result();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin/Instructor Dashboard | Class Cloud</title>
-    <!-- External Libraries -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
-    <link href="https://cdn.datatables.net/1.12.1/css/jquery.dataTables.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" rel="stylesheet">
+    <title>Courses | ClassCloud</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#FF7F50',
+                        secondary: '#FFA07A'
+                    },
+                    borderRadius: {
+                        'button': '8px'
+                    }
+                }
+            }
+        }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11.7.7/dist/sweetalert2.min.css" rel="stylesheet">
-    <style>
-        body {
-            background: linear-gradient(135deg, #6e8efb, #a777e3);
-            font-family: 'Roboto', sans-serif;
-            margin: 0;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        .card-container {
-            display: flex;
-            justify-content: space-around;
-            margin-top: 30px;
-        }
-        .card {
-            width: 250px;
-            height: 150px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-            border-radius: 10px;
-        }
-        .card i {
-            font-size: 50px;
-        }
-        .table-container {
-            max-height: 500px;
-            overflow-y: auto;
-        }
-        .alert {
-            font-weight: 600;
-        }
-        .btn-primary {
-            background: #6e8efb;
-            border: none;
-        }
-        .btn-primary:hover {
-            background: #5a76d6;
-        }
-        .btn-danger {
-            background: #f44336;
-            border: none;
-        }
-        .btn-danger:hover {
-            background: #e53935;
-        }
-        .btn-warning {
-            background: #ff9800;
-            border: none;
-        }
-        .btn-warning:hover {
-            background: #fb8c00;
-        }
-        .step-container {
-            display: none;
-            animation: fadeIn 0.5s ease-in-out;
-        }
-        .step-container.active {
-            display: block;
-        }
-        .next-btn {
-            margin-top: 20px;
-        }
-    </style>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.5.0/fonts/remixicon.css" rel="stylesheet">
 </head>
-<body>
+<body class="bg-[#FFFAF0] font-['Roboto'] min-h-screen">
     <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="#">Class Cloud - Admin/Instructor Dashboard</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav">
-                    <li class="nav-item">
-                        <a class="nav-link active" href="admin.php">Dashboard</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="courses.php">Courses</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="logout.php">Logout</a>
-                    </li>
-                </ul>
+    <nav class="bg-gray-900 text-white p-4 shadow-md">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <a href="#" class="text-2xl font-bold">ClassCloud - Courses</a>
+            <div class="hidden md:flex space-x-6">
+                <a href="admin.php" class="hover:text-primary">Dashboard</a>
+                <a href="courses.php" class="hover:text-primary">Courses</a>
+                <a href="logout.php" class="hover:text-primary">Logout</a>
             </div>
+            <button id="mobile-menu-btn" class="md:hidden text-2xl">
+                <i class="ri-menu-line"></i>
+            </button>
+        </div>
+        <div id="mobile-menu" class="hidden md:hidden mt-4 space-y-2">
+            <a href="admin.php" class="block text-white hover:text-primary py-2 px-4">Dashboard</a>
+            <a href="courses.php" class="block text-white hover:text-primary py-2 px-4">Courses</a>
+            <a href="logout.php" class="block text-white hover:text-primary py-2 px-4">Logout</a>
         </div>
     </nav>
 
     <!-- Message Display -->
     <?php if ($message): ?>
-        <div class="container mt-3">
-            <div class="alert alert-<?php echo $messageType; ?>" role="alert">
-                <?php echo $message; ?>
+        <div class="max-w-7xl mx-auto mt-4 px-4">
+            <div class="p-4 rounded-lg text-white <?php echo $messageType === 'success' ? 'bg-green-500' : ($messageType === 'warning' ? 'bg-yellow-500' : 'bg-red-500'); ?>">
+                <?php echo htmlspecialchars($message); ?>
             </div>
         </div>
     <?php endif; ?>
 
-    <!-- Course Add/Edit Form -->
-    <div class="container mt-5">
-        <h2 class="text-center">Add New Course</h2>
-        <div class="step-container active" id="step1">
-            <h4>Course Name</h4>
-            <input type="text" class="form-control" name="course_name" id="course_name" required placeholder="Enter course name">
-            <button type="button" class="btn btn-primary next-btn" onclick="nextStep(2)">Next</button>
-        </div>
-
-        <div class="step-container" id="step2">
-            <h4>Year</h4>
-            <input type="text" class="form-control" name="year" id="year" required placeholder="Enter year">
-            <button type="button" class="btn btn-primary next-btn" onclick="nextStep(3)">Next</button>
-        </div>
-
-        <div class="step-container" id="step3">
-            <h4>Semester</h4>
-            <input type="text" class="form-control" name="semester" id="semester" required placeholder="Enter semester">
-            <button type="button" class="btn btn-primary next-btn" onclick="nextStep(4)">Next</button>
-        </div>
-
-        <div class="step-container" id="step4">
-            <h4>Subject</h4>
-            <input type="text" class="form-control" name="subject" id="subject" required placeholder="Enter subject">
-            <button type="button" class="btn btn-primary next-btn" onclick="nextStep(5)">Next</button>
-        </div>
-
-        <div class="step-container" id="step5">
-            <h4>Unit</h4>
-            <input type="text" class="form-control" name="unit" id="unit" required placeholder="Enter unit">
-            <button type="button" class="btn btn-primary next-btn" onclick="nextStep(6)">Next</button>
-        </div>
-
-        <div class="step-container" id="step6">
-            <h4>Topic</h4>
-            <input type="text" class="form-control" name="topic" id="topic" required placeholder="Enter topic">
-            <button type="button" class="btn btn-primary next-btn" onclick="nextStep(7)">Next</button>
-        </div>
-
-        <div class="step-container" id="step7">
-            <h4>Notes (Upload PDF/PPT or Paste Link)</h4>
-            <input type="file" class="form-control" name="notes_file" id="notes_file" accept=".pdf,.ppt,.pptx">
-            <p>OR</p>
-            <input type="text" class="form-control" name="notes_link" id="notes_link" placeholder="Paste the link to the notes (PDF/PPT)">
-            <button type="button" class="btn btn-success next-btn" onclick="submitCourse()">Submit</button>
-        </div>
+    <!-- Add Course Form -->
+    <div class="max-w-7xl mx-auto mt-8 px-4">
+        <h2 class="text-2xl font-bold text-gray-900 mb-4">Add New Course</h2>
+        <form method="POST" enctype="multipart/form-data" class="bg-white p-6 rounded-lg shadow-lg">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="mb-4">
+                    <label for="course_name" class="block text-sm font-medium text-gray-700">Course Name</label>
+                    <input type="text" id="course_name" name="course_name" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" placeholder="Enter course name" required>
+                </div>
+                <div class="mb-4">
+                    <label for="year" class="block text-sm font-medium text-gray-700">Year</label>
+                    <input type="text" id="year" name="year" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" placeholder="Enter year" required>
+                </div>
+                <div class="mb-4">
+                    <label for="semester" class="block text-sm font-medium text-gray-700">Semester</label>
+                    <input type="text" id="semester" name="semester" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" placeholder="Enter semester" required>
+                </div>
+                <div class="mb-4">
+                    <label for="subject" class="block text-sm font-medium text-gray-700">Subject</label>
+                    <input type="text" id="subject" name="subject" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" placeholder="Enter subject" required>
+                </div>
+                <div class="mb-4">
+                    <label for="unit" class="block text-sm font-medium text-gray-700">Unit</label>
+                    <input type="text" id="unit" name="unit" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" placeholder="Enter unit" required>
+                </div>
+                <div class="mb-4">
+                    <label for="topic" class="block text-sm font-medium text-gray-700">Topic</label>
+                    <input type="text" id="topic" name="topic" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" placeholder="Enter topic" required>
+                </div>
+            </div>
+            <div class="mb-4">
+                <label for="notes_file" class="block text-sm font-medium text-gray-700">Notes (Upload PDF/PPT)</label>
+                <input type="file" id="notes_file" name="notes_file" accept=".pdf,.ppt,.pptx" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary">
+                <p class="text-sm text-gray-500 mt-1">OR</p>
+                <input type="text" id="notes_link" name="notes_link" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" placeholder="Paste link to notes (PDF/PPT)">
+            </div>
+            <button type="submit" name="add_course" class="w-full bg-primary text-white px-6 py-3 rounded-button hover:bg-primary/90 transition-all font-semibold">Add Course</button>
+        </form>
     </div>
 
     <!-- Courses List -->
-    <div class="container mt-5 table-container">
-        <h2 class="text-center">Manage Courses</h2>
-        <table id="coursesTable" class="table table-bordered mt-3">
-            <thead>
-                <tr>
-                    <th>Course Name</th>
-                    <th>Year</th>
-                    <th>Semester</th>
-                    <th>Subject</th>
-                    <th>Unit</th>
-                    <th>Topic</th>
-                    <th>Notes</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php while ($course = $result->fetch_assoc()): ?>
+    <div class="max-w-7xl mx-auto mt-8 px-4 mb-8">
+        <h2 class="text-2xl font-bold text-gray-900 mb-4">Manage Courses</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full bg-white shadow-lg rounded-lg">
+                <thead class="bg-gray-100">
                     <tr>
-                        <td><?php echo htmlspecialchars($course['course_name']); ?></td>
-                        <td><?php echo htmlspecialchars($course['year']); ?></td>
-                        <td><?php echo htmlspecialchars($course['semester']); ?></td>
-                        <td><?php echo htmlspecialchars($course['subject']); ?></td>
-                        <td><?php echo htmlspecialchars($course['unit']); ?></td>
-                        <td><?php echo htmlspecialchars($course['topic']); ?></td>
-                        <td>
-                            <?php
-                                if (filter_var($course['notes'], FILTER_VALIDATE_URL)) {
-                                    echo '<a href="' . $course['notes'] . '" target="_blank">View Notes</a>';
-                                } else {
-                                    echo '<a href="' . $course['notes'] . '" target="_blank">Download Notes</a>';
-                                }
-                            ?>
-                        </td>
-                        <td>
-                            <a href="courses.php?action=delete&course_id=<?php echo $course['id']; ?>" class="btn btn-danger btn-sm">Delete</a>
-                        </td>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Course Name</th>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Year</th>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Semester</th>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Subject</th>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Unit</th>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Topic</th>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Notes</th>
+                        <th class="p-4 text-left text-sm font-semibold text-gray-700">Action</th>
                     </tr>
-                <?php endwhile; ?>
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    <?php while ($course = $courses->fetch_assoc()): ?>
+                        <tr class="border-t">
+                            <td class="p-4"><?php echo htmlspecialchars($course['course_name']); ?></td>
+                            <td class="p-4"><?php echo htmlspecialchars($course['year']); ?></td>
+                            <td class="p-4"><?php echo htmlspecialchars($course['semester']); ?></td>
+                            <td class="p-4"><?php echo htmlspecialchars($course['subject']); ?></td>
+                            <td class="p-4"><?php echo htmlspecialchars($course['unit']); ?></td>
+                            <td class="p-4"><?php echo htmlspecialchars($course['topic']); ?></td>
+                            <td class="p-4">
+                                <?php
+                                if (filter_var($course['notes'], FILTER_VALIDATE_URL)) {
+                                    echo '<a href="' . htmlspecialchars($course['notes']) . '" target="_blank" class="text-primary hover:underline">View Notes</a>';
+                                } else {
+                                    echo '<a href="' . htmlspecialchars($course['notes']) . '" target="_blank" class="text-primary hover:underline">Download Notes</a>';
+                                }
+                                ?>
+                            </td>
+                            <td class="p-4">
+                                <a href="courses.php?action=delete&course_id=<?php echo $course['id']; ?>" class="bg-red-500 text-white px-4 py-2 rounded-button hover:bg-red-600">Delete</a>
+                            </td>
+                        </tr>
+                    <?php endwhile; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 
-    <!-- Bootstrap JS and External Libraries -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
-    <script src="https://cdn.datatables.net/1.12.1/js/jquery.dataTables.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.7.7/dist/sweetalert2.all.min.js"></script>
     <script>
-        $(document).ready(function() {
-            $('#coursesTable').DataTable();
+        // Mobile menu toggle
+        const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+        const mobileMenu = document.getElementById('mobile-menu');
+        mobileMenuBtn.addEventListener('click', () => {
+            mobileMenu.classList.toggle('hidden');
         });
-
-        function nextStep(step) {
-            // Hide all steps
-            $('.step-container').removeClass('active');
-            // Show the next step
-            $('#step' + step).addClass('active');
-        }
-
-        function submitCourse() {
-            // Collect form data
-            var courseData = new FormData();
-            courseData.append('course_name', $('#course_name').val());
-            courseData.append('year', $('#year').val());
-            courseData.append('semester', $('#semester').val());
-            courseData.append('subject', $('#subject').val());
-            courseData.append('unit', $('#unit').val());
-            courseData.append('topic', $('#topic').val());
-            courseData.append('notes_file', $('#notes_file')[0].files[0]);
-            courseData.append('notes_link', $('#notes_link').val());
-            courseData.append('add_course', true);
-
-            $.ajax({
-                url: 'courses.php',
-                type: 'POST',
-                data: courseData,
-                contentType: false,
-                processData: false,
-                success: function(response) {
-                    // Display success message
-                    Swal.fire('Success', 'Course added successfully!', 'success');
-                },
-                error: function() {
-                    Swal.fire('Error', 'There was an issue adding the course.', 'error');
-                }
-            });
-        }
     </script>
 </body>
 </html>
