@@ -14,65 +14,63 @@ $messageType = '';
 
 // Handle adding a new course (Instructor only)
 if ($_SESSION['user_role'] === 'instructor' && isset($_POST['add_course'])) {
-    $courseName = filter_input(INPUT_POST, 'course_name', FILTER_SANITIZE_STRING);
-    $semester = filter_input(INPUT_POST, 'semester', FILTER_SANITIZE_STRING);
-    $year = filter_input(INPUT_POST, 'year', FILTER_SANITIZE_STRING);
-    $subject = filter_input(INPUT_POST, 'subject', FILTER_SANITIZE_STRING);
-    $unit = filter_input(INPUT_POST, 'unit', FILTER_SANITIZE_STRING);
-    $topic = filter_input(INPUT_POST, 'topic', FILTER_SANITIZE_STRING);
-    $notesLink = filter_input(INPUT_POST, 'notes_link', FILTER_SANITIZE_URL);
+    $courseName = filter_input(INPUT_POST, 'course_name', FILTER_SANITIZE_STRING) ?? '';
+    $semester = filter_input(INPUT_POST, 'semester', FILTER_SANITIZE_STRING) ?? '';
+    $year = filter_input(INPUT_POST, 'year', FILTER_SANITIZE_STRING) ?? '';
+    $subject = filter_input(INPUT_POST, 'subject', FILTER_SANITIZE_STRING) ?? '';
+    $unit = filter_input(INPUT_POST, 'unit', FILTER_SANITIZE_STRING) ?? '';
+    $topic = filter_input(INPUT_POST, 'topic', FILTER_SANITIZE_STRING) ?? '';
+    $notesLink = filter_input(INPUT_POST, 'notes_link', FILTER_SANITIZE_URL) ?? '';
     $notes = '';
 
-    // Validate required fields
-    if (empty($courseName) || empty($semester) || empty($year) || empty($subject) || empty($unit) || empty($topic)) {
-        $message = "All fields are required.";
-        $messageType = 'danger';
-    } else {
-        // Handle file upload
-        if ($_FILES['notes_file']['error'] === UPLOAD_ERR_OK) {
-            $fileTmpPath = $_FILES['notes_file']['tmp_name'];
-            $fileName = $_FILES['notes_file']['name'];
-            $fileSize = $_FILES['notes_file']['size'];
-            $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
-            $allowedExtensions = ['pdf', 'ppt', 'pptx'];
+    // Handle "other" inputs if provided
+    if ($semester === 'other') $semester = filter_input(INPUT_POST, 'semester_other', FILTER_SANITIZE_STRING) ?? '';
+    if ($year === 'other') $year = filter_input(INPUT_POST, 'year_other', FILTER_SANITIZE_STRING) ?? '';
+    if ($subject === 'other') $subject = filter_input(INPUT_POST, 'subject_other', FILTER_SANITIZE_STRING) ?? '';
+    if ($unit === 'other') $unit = filter_input(INPUT_POST, 'unit_other', FILTER_SANITIZE_STRING) ?? '';
 
-            if (in_array($fileExtension, $allowedExtensions)) {
-                $uploadDir = 'uploads/';
-                if (!is_dir($uploadDir)) {
-                    mkdir($uploadDir, 0755, true);
-                }
-                $newFileName = md5(time() . $fileName) . '.' . $fileExtension;
-                $destPath = $uploadDir . $newFileName;
+    // Handle file upload
+    if ($_FILES['notes_file']['error'] === UPLOAD_ERR_OK) {
+        $fileTmpPath = $_FILES['notes_file']['tmp_name'];
+        $fileName = $_FILES['notes_file']['name'];
+        $fileSize = $_FILES['notes_file']['size'];
+        $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+        $allowedExtensions = ['pdf', 'ppt', 'pptx'];
 
-                if (move_uploaded_file($fileTmpPath, $destPath)) {
-                    $notes = $destPath;
-                } else {
-                    $message = "Error uploading the file.";
-                    $messageType = 'danger';
-                }
+        if (in_array($fileExtension, $allowedExtensions)) {
+            $uploadDir = 'uploads/';
+            if (!is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+            $newFileName = md5(time() . $fileName) . '.' . $fileExtension;
+            $destPath = $uploadDir . $newFileName;
+
+            if (move_uploaded_file($fileTmpPath, $destPath)) {
+                $notes = $destPath;
             } else {
-                $message = "Only PDF, PPT, and PPTX files are allowed.";
+                $message = "Error uploading the file.";
                 $messageType = 'danger';
             }
-        } elseif (!empty($notesLink)) {
-            $notes = $notesLink;
         } else {
-            $message = "Please provide either a file or a link for notes.";
+            $message = "Only PDF, PPT, and PPTX files are allowed.";
             $messageType = 'danger';
         }
+    } elseif (!empty($notesLink)) {
+        $notes = $notesLink;
+    }
 
-        if ($notes && !$message) {
-            $stmt = $conn->prepare("INSERT INTO courses (course_name, semester, year, subject, unit, topic, notes, college_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("ssssssss", $courseName, $semester, $year, $subject, $unit, $topic, $notes, $_SESSION['college_code']);
-            if ($stmt->execute()) {
-                $message = "Course added successfully!";
-                $messageType = 'success';
-            } else {
-                $message = "Error adding course: " . $stmt->error;
-                $messageType = 'danger';
-            }
-            $stmt->close();
+    // Insert even if some fields are empty
+    if (!$message) {
+        $stmt = $conn->prepare("INSERT INTO courses (course_name, semester, year, subject, unit, topic, notes, college_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("ssssssss", $courseName, $semester, $year, $subject, $unit, $topic, $notes, $_SESSION['college_code']);
+        if ($stmt->execute()) {
+            $message = "Course added successfully!";
+            $messageType = 'success';
+        } else {
+            $message = "Error adding course: " . $stmt->error;
+            $messageType = 'danger';
         }
+        $stmt->close();
     }
 }
 
@@ -168,55 +166,55 @@ $units = $conn->query("SELECT DISTINCT unit FROM courses WHERE college_code = '{
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div class="mb-4">
                         <label for="course_name" class="block text-sm font-medium text-gray-700">Course Name</label>
-                        <input type="text" id="course_name" name="course_name" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" placeholder="Enter course name" required>
+                        <input type="text" id="course_name" name="course_name" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" placeholder="Enter course name">
                     </div>
                     <div class="mb-4">
                         <label for="year" class="block text-sm font-medium text-gray-700">Year</label>
-                        <select id="year" name="year" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" required>
+                        <select id="year" name="year" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary">
                             <option value="">Select Year</option>
                             <?php foreach ($years as $year): ?>
                                 <option value="<?php echo htmlspecialchars($year['year']); ?>"><?php echo htmlspecialchars($year['year']); ?></option>
                             <?php endforeach; ?>
                             <option value="other">Other</option>
                         </select>
-                        <input type="text" id="year_other" name="year" class="mt-2 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary hidden" placeholder="Enter new year">
+                        <input type="text" id="year_other" name="year_other" class="mt-2 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary hidden" placeholder="Enter new year">
                     </div>
                     <div class="mb-4">
                         <label for="semester" class="block text-sm font-medium text-gray-700">Semester</label>
-                        <select id="semester" name="semester" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" required>
+                        <select id="semester" name="semester" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary">
                             <option value="">Select Semester</option>
                             <?php foreach ($semesters as $semester): ?>
                                 <option value="<?php echo htmlspecialchars($semester['semester']); ?>"><?php echo htmlspecialchars($semester['semester']); ?></option>
                             <?php endforeach; ?>
                             <option value="other">Other</option>
                         </select>
-                        <input type="text" id="semester_other" name="semester" class="mt-2 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary hidden" placeholder="Enter new semester">
+                        <input type="text" id="semester_other" name="semester_other" class="mt-2 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary hidden" placeholder="Enter new semester">
                     </div>
                     <div class="mb-4">
                         <label for="subject" class="block text-sm font-medium text-gray-700">Subject</label>
-                        <select id="subject" name="subject" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" required>
+                        <select id="subject" name="subject" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary">
                             <option value="">Select Subject</option>
                             <?php foreach ($subjects as $subject): ?>
                                 <option value="<?php echo htmlspecialchars($subject['subject']); ?>"><?php echo htmlspecialchars($subject['subject']); ?></option>
                             <?php endforeach; ?>
                             <option value="other">Other</option>
                         </select>
-                        <input type="text" id="subject_other" name="subject" class="mt-2 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary hidden" placeholder="Enter new subject">
+                        <input type="text" id="subject_other" name="subject_other" class="mt-2 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary hidden" placeholder="Enter new subject">
                     </div>
                     <div class="mb-4">
                         <label for="unit" class="block text-sm font-medium text-gray-700">Unit</label>
-                        <select id="unit" name="unit" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" required>
+                        <select id="unit" name="unit" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary">
                             <option value="">Select Unit</option>
                             <?php foreach ($units as $unit): ?>
                                 <option value="<?php echo htmlspecialchars($unit['unit']); ?>"><?php echo htmlspecialchars($unit['unit']); ?></option>
                             <?php endforeach; ?>
                             <option value="other">Other</option>
                         </select>
-                        <input type="text" id="unit_other" name="unit" class="mt-2 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary hidden" placeholder="Enter new unit">
+                        <input type="text" id="unit_other" name="unit_other" class="mt-2 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary hidden" placeholder="Enter new unit">
                     </div>
                     <div class="mb-4">
                         <label for="topic" class="block text-sm font-medium text-gray-700">Topic</label>
-                        <input type="text" id="topic" name="topic" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" placeholder="Enter topic" required>
+                        <input type="text" id="topic" name="topic" class="mt-1 w-full px-4 py-2 border border-gray-300 rounded-button focus:ring-primary focus:border-primary" placeholder="Enter topic">
                     </div>
                 </div>
                 <div class="mb-4">
@@ -295,12 +293,8 @@ $units = $conn->query("SELECT DISTINCT unit FROM courses WHERE college_code = '{
             select.addEventListener('change', () => {
                 if (select.value === 'other') {
                     otherInput.classList.remove('hidden');
-                    otherInput.required = true;
-                    select.required = false;
                 } else {
                     otherInput.classList.add('hidden');
-                    otherInput.required = false;
-                    select.required = true;
                 }
             });
         });
